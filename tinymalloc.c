@@ -1,3 +1,4 @@
+#include "tinymalloc.h"
 #include <stdio.h>
 #include <stddef.h>
 #include <unistd.h>
