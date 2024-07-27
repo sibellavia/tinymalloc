@@ -4,8 +4,6 @@
 #include <unistd.h>
 
 #define INITIAL_HEAP_SIZE (1024 * 1024)
-#define THRESHOLD (1024)
-#define EXPANSION_SIZE (1024 * 1024)
 
 /* Block Structure */
 
@@ -110,6 +108,24 @@ struct block_header *split_block(struct block_header *block, size_t size) {
   free_list = new_block;
 
   return block;
+}
+
+void remove_from_free_list(struct block_header *block) {
+  if (free_list == block) {
+    // block to remove is at the head of the free list
+    free_list = block->next_free;
+  } else {
+    struct block_header *current = free_list;
+    while (current->next_free != NULL && current->next_free != block) {
+      current = current->next_free;
+    }
+
+    if (current->next_free == block) {
+      current->next_free = block->next_free;
+    }
+  }
+
+  block->next_free = NULL;
 }
 
 /* tinymalloc */
