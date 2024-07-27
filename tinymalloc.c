@@ -90,13 +90,26 @@ struct block_header *extend_heap(size_t size) {
 
 /* split_block() */
 
-void split_block(struct block_header *block, size_t size) {
-  // 1. Calculate the remaining size
-  // 2. calculate the position of the new block
-  // 3. initialize new block
-  // 4. adjust the size of the original block
-  // 5. insert the new block into the main list
-  // 6. add the new block to the free list
+struct block_header *split_block(struct block_header *block, size_t size) {
+  size_t remaining_size = block->size - (sizeof(struct block_header) + size);
+
+  if (remaining_size < sizeof(struct block_header) + sizeof(size_t)) {
+    return NULL; // not enough space to split
+  }
+
+  struct block_header *new_block =
+      (struct block_header *)((char *)block + sizeof(struct block_header) +
+                              size);
+  new_block->size = remaining_size - sizeof(struct block_header);
+
+  new_block->next = block->next;
+  block->next = new_block;
+  block->size = size;
+
+  new_block->next_free = free_list;
+  free_list = new_block;
+
+  return block;
 }
 
 /* tinymalloc */
