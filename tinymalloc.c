@@ -1,6 +1,6 @@
 #include "tinymalloc.h"
-#include <stdio.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <unistd.h>
 
 #define INITIAL_HEAP_SIZE (1024 * 1024)
@@ -9,91 +9,130 @@
 
 /* Block Structure */
 
-struct block {
-    size_t size;
-    int is_free;
-    struct block *next;
-} *heap;
+struct block_header {
+  size_t size;
+  int is_free;
+  struct block_header *next;
+  struct block_header *next_free;
+};
 
-/* tinymalloc() */
-void *tinymalloc(size_t size){
-    if(size == 0) return NULL;
+struct block_header *heap_start = NULL;
+struct block_header *free_list = NULL;
 
-    // Initialize Heap if it hasn't been initialized yet
-    if(heap == NULL){
-        void *initial_mem = sbrk(INITIAL_HEAP_SIZE);
+/* initialize_heap() */
+void *initialize_heap() {
+  void *mem = sbrk(INITIAL_HEAP_SIZE);
+  if (mem == (void *)-1)
+    return NULL;
 
-        // When sbrk() fails to allocate memory, it returns (void*)-1
-        // If so, we return NULL as an error
-        if(initial_mem == (void*)-1) return NULL;
+  struct block_header *heap = (struct block_header *)mem;
+  heap->size = INITIAL_HEAP_SIZE - sizeof(struct block_header);
+  heap->is_free = 1;
+  heap->next = NULL;
 
-        // sbrk() returns a void pointer to the start of the newly allocated memory.
-        // We cast this to struct block* because we want to use the beginning
-        // of this memory to store our block metadata.
-        heap = (struct block*)initial_mem;
-        heap->size = INITIAL_HEAP_SIZE - sizeof(struct block);
-        heap->is_free = 1;
-        heap->next = NULL;
+  return heap;
+}
+
+/* find_free_block() */
+struct block_header *find_free_block(size_t size) {
+  struct block_header *current = free_list;
+  struct block_header *prev = NULL;
+
+  while (current != NULL) {
+    if (current->size >= size) {
+      if (prev == NULL) {
+        free_list = current->next_free;
+      } else {
+        prev->next_free = current->next_free;
+      }
+      return current;
     }
 
-    struct block *current = heap;
+    prev = current;
+    current = current->next_free;
+  }
 
-    while(1){
-        while(current){
-            if(current->is_free && current->size >= size){
-                current->is_free = 0;
+  return NULL; // no suitable block found
+}
 
-                // Size management, we split if it is too much
-                if(current->size > size + sizeof(struct block) + THRESHOLD){
-                    // Get extra memory
-                    size_t extra_memory = current->size - size - sizeof(struct block);
+/* extend_heap() */
 
-                    // Initialize new block
-                    struct block *new_block = (struct block*)((char*)current + sizeof(struct block) + size);
+struct block_header *extend_heap(size_t size) {
+  size_t total_size = size + sizeof(struct block_header);
+  void *mem = sbrk(total_size);
 
-                    new_block->is_free = 1;
-                    new_block->size = extra_memory;
-                    new_block->next = current->next;
+  if (mem == (void *)-1) {
+    return NULL;
+  }
 
-                    current->next = new_block;
-                    current->size = size;
-                }
+  struct block_header *new_block = (struct block_header *)mem;
+  new_block->size = size;
+  new_block->is_free = 1;
+  new_block->next = NULL;
+  new_block->next_free = NULL;
 
-                // The reason for returning current + 1 is to skip over the
-                // block metadata and return a pointer to the usable memory.
-                // When you add 1 to a struct pointer, it advances the pointer
-                // by the size of the struct. So current + 1 points to the
-                // memory immediately after the block metadata, which is where
-                // the usable memory begins.
-                return (void*)(current + 1); // We return pointer to usable memory
-            }
-
-            current = current->next;
-        }
-
-        // No suitable memory found, we request more memory
-        void *more_memory = sbrk(EXPANSION_SIZE);
-
-        if(more_memory == (void*)-1) return NULL;
-
-        // Set up new block
-        struct block *additional_block = (struct block*)more_memory;
-
-        additional_block->size = EXPANSION_SIZE - sizeof(struct block);
-        additional_block->is_free = 1;
-        additional_block->next = NULL;
-
-        // Add additional block at the end of the list
-        if(heap == NULL){
-            heap = additional_block;
-        } else {
-            struct block *last = heap;
-            while(last->next != NULL){
-                last = last->next;
-            }
-            last->next = additional_block;
-        }
-
-        current = additional_block;
+  if (heap_start == NULL) {
+    heap_start = new_block;
+  } else {
+    struct block_header *current = heap_start;
+    while (current->next != NULL) {
+      current = current->next;
     }
+    current->next = new_block;
+  }
+
+  // add to free list
+  new_block->next_free = free_list;
+  free_list = new_block;
+
+  return new_block;
+}
+
+/* split_block() */
+
+void split_block(struct block_header *block, size_t size) {
+  // 1. Calculate the remaining size
+  // 2. calculate the position of the new block
+  // 3. initialize new block
+  // 4. adjust the size of the original block
+  // 5. insert the new block into the main list
+  // 6. add the new block to the free list
+}
+
+/* tinymalloc */
+
+void *tinymalloc(size_t size) {
+  if (size == 0) {
+    return NULL;
+  }
+
+  size = (size + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1);
+
+  if (heap_start == NULL) {
+    heap_start = initialize_heap();
+    if (heap_start == NULL)
+      return NULL;
+    free_list = heap_start;
+  }
+
+  struct block_header *block = find_free_block(size);
+
+  if (block == NULL) {
+    // we have to extend the heap because we didn't find free blocks
+    block = extend_heap(size);
+    if (block == NULL) {
+      return NULL;
+    }
+  }
+
+  // if the block is too big, we will split it
+  if (block->size > size + sizeof(struct block_header) + sizeof(size_t)) {
+    split_block(block, size);
+  }
+
+  block->is_free = 0;
+
+  remove_from_free_list(block);
+
+  return (void *)(block + 1);
 }
