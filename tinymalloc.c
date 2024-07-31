@@ -99,8 +99,10 @@ struct block_header *split_block(struct block_header *block, size_t size) {
       (struct block_header *)((char *)block + sizeof(struct block_header) +
                               size);
   new_block->size = remaining_size - sizeof(struct block_header);
-
+  new_block->is_free = 1;
   new_block->next = block->next;
+  new_block->next_free = NULL;
+
   block->next = new_block;
   block->size = size;
 
@@ -164,4 +166,20 @@ void *tinymalloc(size_t size) {
   remove_from_free_list(block);
 
   return (void *)(block + 1);
+}
+
+void add_to_free_list(struct *block_header) {
+  // I have to implement this
+}
+
+void tinyfree(void *ptr) {
+  if (ptr == NULL) {
+    return;
+  }
+
+  struct block_header *block = (struct block_header *)ptr - 1;
+
+  block->is_free = 1;
+
+  add_to_free_list(block);
 }
