@@ -9,13 +9,14 @@
 
 struct block_header {
   size_t size;
-  int is_free;
   struct block_header *next;
   struct block_header *next_free;
+  int is_free;
 };
 
 struct block_header *heap_start = NULL;
 struct block_header *free_list = NULL;
+struct block_header *heap_end = NULL;
 
 /* initialize_heap() */
 void *initialize_heap() {
@@ -27,6 +28,10 @@ void *initialize_heap() {
   heap->size = INITIAL_HEAP_SIZE - sizeof(struct block_header);
   heap->is_free = 1;
   heap->next = NULL;
+  heap->next_free = NULL;
+
+  heap_start = heap;
+  heap_end = heap;
 
   return heap;
 }
