@@ -76,12 +76,10 @@ struct block_header *extend_heap(size_t size) {
 
   if (heap_start == NULL) {
     heap_start = new_block;
+    heap_end = new_block;
   } else {
-    struct block_header *current = heap_start;
-    while (current->next != NULL) {
-      current = current->next;
-    }
-    current->next = new_block;
+    heap_end->next = new_block;
+    heap_end = new_block;
   }
 
   // add to free list
@@ -107,6 +105,10 @@ struct block_header *split_block(struct block_header *block, size_t size) {
   new_block->is_free = 1;
   new_block->next = block->next;
   new_block->next_free = NULL;
+
+  if (block == heap_end) {
+    heap_end = new_block;
+  }
 
   block->next = new_block;
   block->size = size;
@@ -142,12 +144,14 @@ void *tinymalloc(size_t size) {
     return NULL;
   }
 
+  // align the size
   size = (size + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1);
 
   if (heap_start == NULL) {
     heap_start = initialize_heap();
     if (heap_start == NULL)
       return NULL;
+    heap_end = heap_start;
     free_list = heap_start;
   }
 
@@ -159,6 +163,7 @@ void *tinymalloc(size_t size) {
     if (block == NULL) {
       return NULL;
     }
+    // i could update heap_end, but is already updated in extend_heap
   }
 
   // if the block is too big, we will split it
@@ -173,8 +178,25 @@ void *tinymalloc(size_t size) {
   return (void *)(block + 1);
 }
 
-void add_to_free_list(struct *block_header) {
-  // I have to implement this
+void coalesce(struct block_header *block) {
+  struct block_header *next = block->next;
+
+  // coalesce with next block if free
+  if (next && next->is_free) {
+    remove_from_free_list(next);
+
+    // we combine the sizes
+    block->size += next->size + sizeof(struct block_header);
+    block->next = next->next;
+
+    if (next == heap_end) {
+      heap_end = block;
+    }
+  }
+
+  // note that i'm not coalisce with the previous block becaue i didn't
+  // implement a prev ptr so for a more complete implementation you might want
+  // to add a prev ptr btw i hope to implement it in the future :-)
 }
 
 void tinyfree(void *ptr) {
@@ -182,9 +204,14 @@ void tinyfree(void *ptr) {
     return;
   }
 
+  // we get the block header
   struct block_header *block = (struct block_header *)ptr - 1;
 
   block->is_free = 1;
 
-  add_to_free_list(block);
+  block->next_free = free_list;
+  free_list = block;
+
+  // we coalesce with neighboring block
+  coalesce(block);
 }
