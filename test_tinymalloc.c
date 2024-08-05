@@ -62,13 +62,13 @@ void test_tinyfree() {
 
   // test freeing NULL
   tinyfree(NULL);
-  printf("test 3 passed: Freed NULL pointer\n");
+  printf("test 3 passed: freed NULL pointer\n");
 
   printf("tinyfree tests completed successfully :-)\n\n");
 }
 
 void test_coalescing() {
-  printf("Running coalescing tests...\n");
+  printf("running coalescing tests...\n");
 
   // Allocate 3 blocks
   int *p1 = (int *)tinymalloc(sizeof(int));
@@ -87,7 +87,7 @@ void test_coalescing() {
   assert(p4 != NULL);
   assert(p4 == p1 || p4 == p2); // The new block should start at p1 or p2
 
-  printf("Coalescing test passed\n\n");
+  printf("coalescing test passed :-)\n\n");
 
   // Clean up
   tinyfree(p3);
@@ -98,6 +98,6 @@ int main() {
   test_tinymalloc_basic();
   test_tinyfree();
   test_coalescing();
-  printf("All tests completed successfully!\n");
+  printf("all tests completed successfully\n");
   return 0;
 }

@@ -1,4 +1,5 @@
 #include "tinymalloc.h"
+#include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -17,6 +18,8 @@ struct block_header {
 struct block_header *heap_start = NULL;
 struct block_header *free_list = NULL;
 struct block_header *heap_end = NULL;
+
+pthread_mutex_t tinymalloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* initialize_heap() */
 void *initialize_heap() {
@@ -140,6 +143,9 @@ void remove_from_free_list(struct block_header *block) {
 /* tinymalloc */
 
 void *tinymalloc(size_t size) {
+  void *result;
+  pthread_mutex_lock(&tinymalloc_mutex);
+
   if (size == 0) {
     return NULL;
   }
@@ -176,6 +182,8 @@ void *tinymalloc(size_t size) {
   remove_from_free_list(block);
 
   return (void *)(block + 1);
+  pthread_mutex_unlock(&tinymalloc_mutex);
+  return result;
 }
 
 void coalesce(struct block_header *block) {
@@ -200,6 +208,7 @@ void coalesce(struct block_header *block) {
 }
 
 void tinyfree(void *ptr) {
+  pthread_mutex_lock(&tinymalloc_mutex);
   if (ptr == NULL) {
     return;
   }
@@ -214,4 +223,5 @@ void tinyfree(void *ptr) {
 
   // we coalesce with neighboring block
   coalesce(block);
+  pthread_mutex_unlock(&tinymalloc_mutex);
 }
