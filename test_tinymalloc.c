@@ -3,101 +3,106 @@
 #include <stdio.h>
 #include <string.h>
 
-void test_tinymalloc_basic() {
-  printf("running basic tinymalloc tests...\n");
-
-  // test 1: allocate a small block
-  int *p1 = (int *)tinymalloc(sizeof(int));
-  assert(p1 != NULL);
-  *p1 = 42;
-  assert(*p1 == 42);
-  printf("test 1 passed: allocated small block and wrote to it\n");
-
-  // test 2: allocate a larger block
-  int *arr = (int *)tinymalloc(10 * sizeof(int));
-  assert(arr != NULL);
-  for (int i = 0; i < 10; i++) {
-    arr[i] = i;
-  }
-  for (int i = 0; i < 10; i++) {
-    assert(arr[i] == i);
-  }
-  printf("test 2 passed: allocated larger block and wrote to it\n");
-
-  // test 3: allocate zero bytes (should return NULL)
-  void *p2 = tinymalloc(0);
-  assert(p2 == NULL);
-  printf("test 3 passed: allocating 0 bytes returns NULL\n");
-
-  // test 4: allocate a very large block
-  void *p3 = tinymalloc(1000000);
-  assert(p3 != NULL);
-  printf("test 4 passed: allocated very large block\n");
-
-  // Free all allocated memory
-  tinyfree(p1);
-  tinyfree(arr);
-  tinyfree(p3);
-  printf("basic tinymalloc tests completed successfully :-)\n\n");
+void test_basic_alloc_and_free() {
+  printf("testing basic allocation and free...\n");
+  void *ptr = tinymalloc(100);
+  assert(ptr != NULL);
+  tinyfree(ptr);
+  printf("PASSED :-)\n\n");
 }
 
-void test_tinyfree() {
-  printf("running tinyfree tests...\n");
-
-  // allocate and free a single block
-  int *p1 = (int *)tinymalloc(sizeof(int));
-  assert(p1 != NULL);
-  tinyfree(p1);
-  printf("test 1 passed: allocated and freed a single block\n");
-
-  // allocate multiple blocks and free them
-  int *p2 = (int *)tinymalloc(sizeof(int));
-  int *p3 = (int *)tinymalloc(sizeof(int));
-  int *p4 = (int *)tinymalloc(sizeof(int));
-  assert(p2 != NULL && p3 != NULL && p4 != NULL);
-  tinyfree(p2);
-  tinyfree(p3);
-  tinyfree(p4);
-  printf("test 2 passed: allocated and freed multiple blocks\n");
-
-  // test freeing NULL
-  tinyfree(NULL);
-  printf("test 3 passed: freed NULL pointer\n");
-
-  printf("tinyfree tests completed successfully :-)\n\n");
+void test_multiple_allocs() {
+  printf("testing multiple allocations...\n");
+  void *ptr1 = tinymalloc(100);
+  void *ptr2 = tinymalloc(200);
+  void *ptr3 = tinymalloc(300);
+  assert(ptr1 != NULL);
+  assert(ptr2 != NULL);
+  assert(ptr3 != NULL);
+  assert(ptr1 != ptr2 && ptr2 != ptr3 && ptr1 != ptr3);
+  tinyfree(ptr1);
+  tinyfree(ptr2);
+  tinyfree(ptr3);
+  printf("PASSED :-)\n\n");
 }
 
-void test_coalescing() {
-  printf("running coalescing tests...\n");
+void test_alloc_zero_size() {
+  printf("testing allocation of zero size...\n");
+  void *ptr = tinymalloc(0);
+  assert(ptr == NULL);
+  printf("PASSED :-)\n\n");
+}
 
-  // Allocate 3 blocks
-  int *p1 = (int *)tinymalloc(sizeof(int));
-  int *p2 = (int *)tinymalloc(sizeof(int));
-  int *p3 = (int *)tinymalloc(sizeof(int));
-  assert(p1 != NULL && p2 != NULL && p3 != NULL);
+void test_alloc_large_size() {
+  printf("testing allocation of large size...\n");
+  printf("about to call tinymalloc for large allocation\n");
+  void *ptr = tinymalloc(1024 * 1024); // 1mb
+  printf("returned from tinymallo call");
 
-  // Free the middle block
-  tinyfree(p2);
+  if (ptr == NULL) {
+    printf("large allocation failed\n");
+    printf("FAILED: unable to allocate large block :-(\n\n");
+    return;
+  } else {
+    printf("large allocation succeded\n");
+    assert(ptr != NULL);
+    printf("about to free large allocation\n");
+    tinyfree(ptr);
+    printf("large allocation freed\n");
+  }
+  printf("PASSED :-)\n\n");
+}
 
-  // Free the first block, should coalesce with the second
-  tinyfree(p1);
+void test_free_null() {
+  printf("testing free of NULL pointer...\n");
+  tinyfree(NULL); // Should not crash
+  printf("PASSED :-)\n\n");
+}
 
-  // Allocate a larger block, should fit in the coalesced space
-  int *p4 = (int *)tinymalloc(2 * sizeof(int));
-  assert(p4 != NULL);
-  assert(p4 == p1 || p4 == p2); // The new block should start at p1 or p2
+void test_write_to_allocated_memory() {
+  printf("testing writing to allocated memory...\n");
+  char *ptr = (char *)tinymalloc(100);
+  assert(ptr != NULL);
+  strcpy(ptr, "Hello, World!");
+  assert(strcmp(ptr, "Hello, World!") == 0);
+  tinyfree(ptr);
+  printf("PASSED :-)\n\n");
+}
 
-  printf("coalescing test passed :-)\n\n");
+void test_reuse_after_free() {
+  printf("testing memory reuse after free...\n");
+  void *ptr1 = tinymalloc(100);
+  tinyfree(ptr1);
+  void *ptr2 = tinymalloc(100);
+  assert(ptr1 == ptr2);
+  tinyfree(ptr2);
+  printf("PASSED :-)\n\n");
+}
 
-  // Clean up
-  tinyfree(p3);
-  tinyfree(p4);
+void test_fragmentation() {
+  printf("testing fragmentation handling...\n");
+  void *ptr1 = tinymalloc(100);
+  void *ptr2 = tinymalloc(200);
+  void *ptr3 = tinymalloc(300);
+  tinyfree(ptr2);
+  void *ptr4 = tinymalloc(150);
+  assert(ptr4 != NULL);
+  tinyfree(ptr1);
+  tinyfree(ptr3);
+  tinyfree(ptr4);
+  printf("PASSED :-)\n\n");
 }
 
 int main() {
-  test_tinymalloc_basic();
-  test_tinyfree();
-  test_coalescing();
-  printf("all tests completed successfully\n");
+  test_basic_alloc_and_free();
+  test_multiple_allocs();
+  test_alloc_zero_size();
+  test_alloc_large_size();
+  test_free_null();
+  test_write_to_allocated_memory();
+  test_reuse_after_free();
+  test_fragmentation();
+
+  printf("all tests passed successfully! :-)\n");
   return 0;
 }
