@@ -24,62 +24,55 @@ i can't guarantee it, but in the future it would be fun to implement a better er
 
 ## roadmap
 
-- [] v0.1 (basic implementation)
+- [x] v0.1 (basic implementation)
 
   - basic allocation and deallocation
   - simple first-fit algorithm
   - rudimentary block splitting
   - basic error checking
   - basic heap initialization
-  - simple coalescing (only with next block)
+  - simple coalescing
   - basic thread safety with global mutex
   - replace sbrk() with mmap()
 
-- [] v0.2 (improved memory management)
+- [] v0.2 (bitmap allocation implementation)
 
-  - refine block splitting algorithm
-  - implement proper coalescing (both with previous and next blocks)
-  - improve free list management
-  - enhance error handling
+  - define constants and data structures for bitmap allocator
+  - implement basic bitmap manipulation functions
+  - implement coalescing of free blocks to reduce fragmentation, based on bitmap
+  - refine tinymalloc, tinyfree and initialization
+  - perform initial performance testing and optimization
 
-- [] v0.3 (memory alignment and optimization)
+- [] v0.3 (enhanced bitmap allocation)
 
-  - implement proper memory alignment
-  - optimize allocation and deallocation with contingency scenarios
-  - basic performance benchmarking
+  - handle larger allocations
+  - optimize bitmap operations, using compiler intrinsics for bit scanning
+  - implement memory alignment support
 
-- [] v0.4 (advanced allocation strategies)
-
-  - implement more efficient free block management
-  - refine the allocation algorithm
-
-- [] v0.5 (thread safety improvements)
-
-  - implement finer-grained locking
-  - extensive testing in multi-threaded environments
-
-- [] v0.6 (advanced features)
+- [] v0.4 (advanced features)
 
   - implement realloc()
+  - add support for different block sizes or multiple heaps
+  - implement strategies to reduce external fragmentation
+  - enhanced thread safety with finer-grained locking
+
+- [] v0.5 (performance tuning and benchmarking)
+
+  - optimize based on benchmark results
+
+- [] v0.6 (memory leak detection)
+
+  - implement memory leak detection and corruption detection
+  - implement stress testing and edge case handling
+
+- [] v0.7 (extended functionality)
+
   - implement calloc()
-  - implement simple strategies to reduce fragmentation
+  - implement memory pools or arenas
 
-- [] v0.7 (robustness and testing)
+- [] v0.8 (system integration)
 
-  - comprehensive test suite
-  - stress testing and edge case handling
-  - basic memory leaking detection capabilities?
-
-- [] v0.8 (performance optimization)
-
-  - free list binning
-  - extensive performance comparisons with other memory allocators
-
-- [] v0.9 (pre-release)
-
-  - code cleanup
-  - documentation
-  - final optimizations based on benchmarks
+- [] v0.9 (pre-release polish)
 
 - [] v1.0 (stable)
 

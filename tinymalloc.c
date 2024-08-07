@@ -80,7 +80,7 @@ void *tinymalloc(size_t size) {
       if (current->size >=
           size + sizeof(struct memory_block) + sizeof(size_t)) {
 
-        printf("DEBUG - split is possible, so we proceed.\n");
+        printf("DEBUG - split is possible, so we proceed.\n"); // i have to carefully review this path because it always goes here!
 
         struct memory_block *new_block =
             (struct memory_block *)((char *)current +
