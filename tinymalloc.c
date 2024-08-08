@@ -1,32 +1,28 @@
 #include "tinymalloc.h"
 #include <errno.h>
 #include <pthread.h>
-#include <stdatomic.h>
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <time.h>
-#include <unistd.h>
 
 #define HEAP_SIZE (1024 * 1024)
-
-/* Mutex */
-pthread_mutex_t tinymalloc_mutex = PTHREAD_MUTEX_INITIALIZER;
+#define ALIGNMENT _Alignof(max_align_t)
 
 /* Block Structure */
-struct memory_block {
+typedef struct memory_block {
   size_t size;
   struct memory_block *next;
   struct memory_block *prev;
   int is_free;
-};
+} memory_block_t;
 
-struct memory_block *heap_head = NULL;
+static memory_block_t *heap_head = NULL;
 pthread_mutex_t malloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* tinymalloc */
-
 void *tinymalloc(size_t size) {
   pthread_mutex_lock(&malloc_mutex);
 
@@ -35,7 +31,7 @@ void *tinymalloc(size_t size) {
   // align the size
   // we ensure that the requested size is algined to a multiple of
   // sizeof(size_t)
-  size = (size + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1);
+  size = (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
 
   printf("DEBUG - size aligned: %zu\n", size);
 
@@ -54,10 +50,10 @@ void *tinymalloc(size_t size) {
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (heap_head == MAP_FAILED) {
       pthread_mutex_unlock(&malloc_mutex);
-      return NULL;
+      return false;
     }
 
-    heap_head->size = HEAP_SIZE - sizeof(struct memory_block);
+    heap_head->size = HEAP_SIZE - sizeof(memory_block_t);
     heap_head->next = NULL;
     heap_head->prev = NULL;
     heap_head->is_free = 1;
@@ -66,26 +62,28 @@ void *tinymalloc(size_t size) {
   }
 
   // first-fit search
-  struct memory_block *current = heap_head;
+  memory_block_t *current = heap_head;
 
   printf("DEBUG - we start the first-fit search.\n");
 
-  struct memory_block *last_block = current->prev;
+  memory_block_t *last_block = current->prev;
 
   while (current) {
     last_block = current;
     if (current->is_free && current->size >= size) {
       printf("DEBUG - block found. we try to split it, if possible.\n");
       // split if possible
-      if (current->size >=
-          size + sizeof(struct memory_block) + sizeof(size_t)) {
+      if (current->size >= size + sizeof(memory_block_t) + ALIGNMENT) {
+        printf(
+            "DEBUG - split is possible, so we proceed.\n"); // i have to
+                                                            // carefully review
+                                                            // this path because
+                                                            // it always goes
+                                                            // here!
 
-        printf("DEBUG - split is possible, so we proceed.\n"); // i have to carefully review this path because it always goes here!
-
-        struct memory_block *new_block =
-            (struct memory_block *)((char *)current +
-                                    sizeof(struct memory_block) + size);
-        new_block->size = current->size - size - sizeof(struct memory_block);
+        memory_block_t *new_block =
+            (memory_block_t *)((char *)current + sizeof(memory_block_t) + size);
+        new_block->size = current->size - size - sizeof(memory_block_t);
         new_block->is_free = 1;
         new_block->next = current->next;
         new_block->prev = current;
@@ -111,10 +109,9 @@ void *tinymalloc(size_t size) {
   }
 
   if (last_block != NULL) {
-    size_t block_size = size + sizeof(struct memory_block);
-    struct memory_block *more_memory = NULL;
-    more_memory = mmap(NULL, size, PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    size_t block_size = size + sizeof(memory_block_t);
+    memory_block_t *more_memory = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (more_memory == MAP_FAILED) {
       pthread_mutex_unlock(&malloc_mutex);
       return NULL; // OOM
@@ -139,6 +136,7 @@ void *tinymalloc(size_t size) {
   return NULL; // OOM
 }
 
+/* tinyfree */
 void tinyfree(void *ptr) {
   if (!ptr)
     return;
@@ -146,13 +144,13 @@ void tinyfree(void *ptr) {
   printf("DEBUG - entered tinyfree. preparing to lock mutex\n");
   pthread_mutex_lock(&malloc_mutex);
   printf("DEBUG - mutex locked, we continue \n");
-  struct memory_block *block = (struct memory_block *)ptr - 1;
+  memory_block_t *block = ((memory_block_t *)ptr) - 1;
   block->is_free = 1;
 
   // coalesce with next block
   if (block->next && block->next->is_free) {
     printf("DEBUG - we coalesce with next block\n");
-    block->size += sizeof(struct memory_block) + block->next->size;
+    block->size += sizeof(memory_block_t) + block->next->size;
     block->next = block->next->next;
     if (block->next) {
       block->next->prev = block;
@@ -162,7 +160,7 @@ void tinyfree(void *ptr) {
   // coalesce with previous block-
   if (block->prev && block->prev->is_free) {
     printf("DEBUG - we coalesce with previous block\n");
-    block->size += sizeof(struct memory_block) + block->prev->size;
+    block->size += sizeof(memory_block_t) + block->prev->size;
     block->prev->next = block->next;
     if (block->next) {
       block->next->prev = block->prev;

@@ -56,17 +56,22 @@ i can't guarantee it, but in the future it would be fun to implement a better er
   - implement strategies to reduce external fragmentation
   - enhanced thread safety with finer-grained locking
 
-- [] v0.5 (performance tuning and benchmarking)
+- [] v0.5 (multi-arena implementation)
 
-  - optimize based on benchmark results
+  - design and implement a multi-arena structure
+  - create a simple arena selection mechanism (thread ID?)
+  - modify allocation and deallocation functions to work with multiple arenas
+  - implement basic load balancing between arenas
 
-- [] v0.6 (memory leak detection)
+- [] v0.6 (per-cpu arena optimization)
 
-  - implement memory leak detection and corruption detection
-  - implement stress testing and edge case handling
+  - extend multi-arena implementation to support per-cpu arenas
+  - implement arena indexing using sched_getcpu()
+  - handle cross-cpu frees and memory migration between arenas
 
 - [] v0.7 (extended functionality)
 
+  - implement debugging and memory leak detection
   - implement calloc()
   - implement memory pools or arenas
 
