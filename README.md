@@ -39,15 +39,20 @@ i can't guarantee it, but in the future it would be fun to implement a better er
 
   - define constants and data structures for bitmap allocator
   - implement basic bitmap manipulation functions
-  - implement coalescing of free blocks to reduce fragmentation, based on bitmap
-  - refine tinymalloc, tinyfree and initialization
+  - implement memory allocation function (tinymalloc) with first-fit algorithm
+  - implement memory deallocation function (tinyfree)
+  - implement initialization function
+  - implement heap extension functionality
+  - implement coalescing for free blocks
   - perform initial performance testing and optimization
+  - add basic debugging output
 
 - [] v0.3 (enhanced bitmap allocation)
 
-  - handle larger allocations
-  - optimize bitmap operations, using compiler intrinsics for bit scanning
-  - implement memory alignment support
+  - implement best-fit allocation algorithm
+  - add support for storing allocation size with each block
+  - implement strategies to reduce fragmentation
+  - optimize bitmap operations
 
 - [] v0.4 (advanced features)
 
