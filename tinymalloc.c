@@ -8,7 +8,9 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#define HEAP_SIZE (1024 * 1024)
+#define HEAP_SIZE 1048576                        // 1 mb
+#define BLOCK_SIZE 16                            // 16 bytes per block
+#define BITMAP_SIZE (HEAP_SIZE / BLOCK_SIZE / 8) // size of bitmap in bytes
 #define ALIGNMENT _Alignof(max_align_t)
 
 /* Block Structure */
@@ -19,155 +21,153 @@ typedef struct memory_block {
   int is_free;
 } memory_block_t;
 
+/* Bitmap */
+// uint8_t *heap: this is a pointer to the memory we'll allocate from.
+// uint8_t bitmap[BITMAP_SIZE]: this array represents which blocks of
+// memory are free or in use. each bit corresponds to one block of
+// memory in the heap.
+typedef struct {
+  uint8_t *heap;
+  uint8_t bitmap[BITMAP_SIZE];
+} BitmapAllocator;
+
 static memory_block_t *heap_head = NULL;
+
+static BitmapAllocator allocator;
+
+static bool allocator_initialized = false;
+
 pthread_mutex_t malloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* tinymalloc */
+/* init_allocator() */
+// here mmap is used to allocate a large chunk of memory for the heap
+// after the check, mmset is used to initialize our bitmap to all zeros
+bool init_allocator() {
+  // allocate memory from the heap
+  allocator.heap = mmap(NULL, HEAP_SIZE, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (allocator.heap == MAP_FAILED) {
+    return false; // initialization failed
+  }
+
+  // initialize the bitmap (all blocks are free)
+  memset(allocator.bitmap, 0, BITMAP_SIZE);
+
+  return true; // initialization succeeded
+}
+
+/* set_bit(size_t index) */
+// sets a specific bit to 1 (marking a block as used)
+void set_bit(size_t index) {
+  allocator.bitmap[index / 8] |= (1 << (index % 8));
+}
+
+/* clear_bit(size_t index) */
+// sets a specific bit to 0 (marking a block as free)
+void clear_bit(size_t index) {
+  allocator.bitmap[index / 8] &= ~(1 << (index % 8));
+}
+
+/* is_bit_set(size_t index) */
+// checks if a specific bit is 1 or 0
+bool is_bit_set(size_t index) {
+  return (allocator.bitmap[index / 8] & (1 << (index % 8))) != 0;
+}
+
+/* new tinymalloc based on bitmap */
 void *tinymalloc(size_t size) {
+  if (size == 0)
+    return NULL;
+
+  if (!allocator_initialized) {
+    pthread_mutex_lock(&malloc_mutex);
+    if (!allocator_initialized) {
+      if (!init_allocator()) {
+        pthread_mutex_unlock(&malloc_mutex);
+        return NULL;
+      }
+      allocator_initialized = true;
+    }
+    pthread_mutex_unlock(&malloc_mutex);
+  }
+
   pthread_mutex_lock(&malloc_mutex);
 
-  printf("DEBUG - entered tinymalloc.\n");
+  // calculate how many blocks we need
+  size_t blocks_needed = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-  // align the size
-  // we ensure that the requested size is algined to a multiple of
-  // sizeof(size_t)
-  size = (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+  // add space for size storage
+  size_t total_size = size + sizeof(size_t);
 
-  printf("DEBUG - size aligned: %zu\n", size);
+  // first-fit search in the bitmap
+  size_t consecutive_free_blocks = 0;
+  size_t allocation_start = 0;
 
-  // v0.1 returns NULL, but in the future it should return a
-  // non-NULL pointer that can be valid for tinyfree
-  if (size == 0) {
-    pthread_mutex_unlock(&malloc_mutex);
-    return NULL;
-  }
-
-  if (heap_head == NULL) {
-    printf("DEBUG - heap non-existent. we start the initialization.\n");
-
-    // we initialize the heap
-    heap_head = mmap(NULL, HEAP_SIZE, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (heap_head == MAP_FAILED) {
-      pthread_mutex_unlock(&malloc_mutex);
-      return false;
-    }
-
-    heap_head->size = HEAP_SIZE - sizeof(memory_block_t);
-    heap_head->next = NULL;
-    heap_head->prev = NULL;
-    heap_head->is_free = 1;
-
-    printf("DEBUG - heap now exists.\n");
-  }
-
-  // first-fit search
-  memory_block_t *current = heap_head;
-
-  printf("DEBUG - we start the first-fit search.\n");
-
-  memory_block_t *last_block = current->prev;
-
-  while (current) {
-    last_block = current;
-    if (current->is_free && current->size >= size) {
-      printf("DEBUG - block found. we try to split it, if possible.\n");
-      // split if possible
-      if (current->size >= size + sizeof(memory_block_t) + ALIGNMENT) {
-        printf(
-            "DEBUG - split is possible, so we proceed.\n"); // i have to
-                                                            // carefully review
-                                                            // this path because
-                                                            // it always goes
-                                                            // here!
-
-        memory_block_t *new_block =
-            (memory_block_t *)((char *)current + sizeof(memory_block_t) + size);
-        new_block->size = current->size - size - sizeof(memory_block_t);
-        new_block->is_free = 1;
-        new_block->next = current->next;
-        new_block->prev = current;
-
-        if (current->next) {
-          current->next->prev = new_block;
+  for (size_t i = 0; i < HEAP_SIZE / BLOCK_SIZE; i++) {
+    if (!is_bit_set(i)) {
+      // this block is free
+      consecutive_free_blocks++;
+      if (consecutive_free_blocks == blocks_needed) {
+        // we've found enough space
+        // mark the blocks as used
+        allocation_start =
+            i - blocks_needed +
+            1; // i is currently at the last block of our found sequence
+        for (size_t j = 0; j < blocks_needed; j++) {
+          set_bit(allocation_start + j);
         }
-        current->size = size;
-        current->next = new_block;
+
+        // calculate the memory address to return
+        // pointer arithmetic: i'm multiplying starting_block by BLOCK_SIZE
+        // to get the byte offset, and adding it to the heap
+        void *allocated_memory =
+            allocator.heap + (allocation_start * BLOCK_SIZE);
+        if (allocated_memory == NULL) {
+          return NULL; // allocation failed
+        }
+        // store the requested size at the beginning of the allocated memory
+        *(size_t *)allocated_memory = size;
+
+        pthread_mutex_unlock(&malloc_mutex);
+
+        // return the address after the size storage
+        return (char *)allocated_memory + sizeof(size_t);
       }
-
-      printf("DEBUG - split is not possible. we take current block as-is.\n");
-
-      current->is_free = 0;
-      current->size = size;
-
-      printf("DEBUG - we prepare to unlock mutex\n");
-      pthread_mutex_unlock(&malloc_mutex);
-      printf("DEBUG - mutex unlocked. we return.\n");
-      return (void *)(current + 1);
+    } else {
+      // this block is used, reset our counter
+      consecutive_free_blocks = 0;
     }
-    current = current->next;
   }
 
-  if (last_block != NULL) {
-    size_t block_size = size + sizeof(memory_block_t);
-    memory_block_t *more_memory = mmap(NULL, size, PROT_READ | PROT_WRITE,
-                                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (more_memory == MAP_FAILED) {
-      pthread_mutex_unlock(&malloc_mutex);
-      return NULL; // OOM
-    }
-
-    more_memory->size = size;
-    more_memory->is_free = 0;
-    more_memory->next = NULL;
-    more_memory->prev = last_block;
-
-    last_block->next = more_memory;
-    printf("DEBUG - we prepare to unlock mutex\n");
-    pthread_mutex_unlock(&malloc_mutex);
-    printf("DEBUG - mutex unlocked. we return newly allocated memory.\n");
-    return (void *)(more_memory + 1);
-  }
-
-  printf("DEBUG - we prepare to unlock mutex\n");
+  // if we get here, we couldn't find enough space
+  // todo: extend heap
   pthread_mutex_unlock(&malloc_mutex);
-  printf("DEBUG - mutex unlocked. we exit. out-of-memory or unexpected error "
-         "occurred.\n");
-  return NULL; // OOM
+  return NULL; // allocation failed
 }
 
 /* tinyfree */
 void tinyfree(void *ptr) {
-  if (!ptr)
+  if (ptr == NULL)
     return;
 
-  printf("DEBUG - entered tinyfree. preparing to lock mutex\n");
   pthread_mutex_lock(&malloc_mutex);
-  printf("DEBUG - mutex locked, we continue \n");
-  memory_block_t *block = ((memory_block_t *)ptr) - 1;
-  block->is_free = 1;
 
-  // coalesce with next block
-  if (block->next && block->next->is_free) {
-    printf("DEBUG - we coalesce with next block\n");
-    block->size += sizeof(memory_block_t) + block->next->size;
-    block->next = block->next->next;
-    if (block->next) {
-      block->next->prev = block;
-    }
+  // todo: calculate which block this pointer corrisponds to
+  void *actual_start = (char *)ptr - sizeof(size_t);
+
+  // retrieve the size of the allocation
+  size_t size = *(size_t *)actual_start;
+
+  // calculate which block this pointer corresponds to
+  size_t block_index = ((uint8_t *)actual_start - allocator.heap) / BLOCK_SIZE;
+
+  // calculate how many blocks were allocated
+  size_t blocks_to_free = (size + sizeof(size_t) + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+  // mark the blocks as free
+  for (size_t i = block_index; i < block_index + blocks_to_free; i++) {
+    clear_bit(i);
   }
 
-  // coalesce with previous block-
-  if (block->prev && block->prev->is_free) {
-    printf("DEBUG - we coalesce with previous block\n");
-    block->size += sizeof(memory_block_t) + block->prev->size;
-    block->prev->next = block->next;
-    if (block->next) {
-      block->next->prev = block->prev;
-    }
-  }
-
-  printf("DEBUG - we unlock mutex\n");
   pthread_mutex_unlock(&malloc_mutex);
-  printf("DEBUG - we unlocked mutex and we exit tinyfree\n");
 }

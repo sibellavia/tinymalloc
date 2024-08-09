@@ -2,20 +2,28 @@
 triple:          'arm64-apple-darwin'
 binary-path:     '/Users/blv/Projects/tinymalloc/test_tinymalloc'
 relocations:
-  - { offsetInCU: 0x26, offset: 0x26, size: 0x8, addend: 0x0, symName: _test_basic_alloc_and_free, symObjAddr: 0x0, symBinAddr: 0x100002C2C, symSize: 0x88 }
-  - { offsetInCU: 0x47, offset: 0x47, size: 0x8, addend: 0x0, symName: _test_basic_alloc_and_free, symObjAddr: 0x0, symBinAddr: 0x100002C2C, symSize: 0x88 }
-  - { offsetInCU: 0x6B, offset: 0x6B, size: 0x8, addend: 0x0, symName: _test_multiple_allocs, symObjAddr: 0x88, symBinAddr: 0x100002CB4, symSize: 0x1D0 }
-  - { offsetInCU: 0xAB, offset: 0xAB, size: 0x8, addend: 0x0, symName: _test_alloc_zero_size, symObjAddr: 0x258, symBinAddr: 0x100002E84, symSize: 0x80 }
-  - { offsetInCU: 0xCF, offset: 0xCF, size: 0x8, addend: 0x0, symName: _test_alloc_large_size, symObjAddr: 0x2D8, symBinAddr: 0x100002F04, symSize: 0xFC }
-  - { offsetInCU: 0xF3, offset: 0xF3, size: 0x8, addend: 0x0, symName: _test_free_null, symObjAddr: 0x3D4, symBinAddr: 0x100003000, symSize: 0x30 }
-  - { offsetInCU: 0x108, offset: 0x108, size: 0x8, addend: 0x0, symName: _test_write_to_allocated_memory, symObjAddr: 0x404, symBinAddr: 0x100003030, symSize: 0xEC }
-  - { offsetInCU: 0x12C, offset: 0x12C, size: 0x8, addend: 0x0, symName: _test_reuse_after_free, symObjAddr: 0x4F0, symBinAddr: 0x10000311C, symSize: 0xA4 }
-  - { offsetInCU: 0x15E, offset: 0x15E, size: 0x8, addend: 0x0, symName: _test_fragmentation, symObjAddr: 0x594, symBinAddr: 0x1000031C0, symSize: 0xC4 }
-  - { offsetInCU: 0x1AC, offset: 0x1AC, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x658, symBinAddr: 0x100003284, symSize: 0x54 }
-  - { offsetInCU: 0x26, offset: 0x1F2, size: 0x8, addend: 0x0, symName: _tinymalloc, symObjAddr: 0x0, symBinAddr: 0x1000032D8, symSize: 0x3E4 }
-  - { offsetInCU: 0x3F, offset: 0x20B, size: 0x8, addend: 0x0, symName: _tinymalloc_mutex, symObjAddr: 0x5C8, symBinAddr: 0x100008000, symSize: 0x0 }
-  - { offsetInCU: 0xAC, offset: 0x278, size: 0x8, addend: 0x0, symName: _heap_head, symObjAddr: 0x1768, symBinAddr: 0x100008080, symSize: 0x0 }
-  - { offsetInCU: 0x118, offset: 0x2E4, size: 0x8, addend: 0x0, symName: _malloc_mutex, symObjAddr: 0x608, symBinAddr: 0x100008040, symSize: 0x0 }
-  - { offsetInCU: 0x122, offset: 0x2EE, size: 0x8, addend: 0x0, symName: _tinymalloc, symObjAddr: 0x0, symBinAddr: 0x1000032D8, symSize: 0x3E4 }
-  - { offsetInCU: 0x1AC, offset: 0x378, size: 0x8, addend: 0x0, symName: _tinyfree, symObjAddr: 0x3E4, symBinAddr: 0x1000036BC, symSize: 0x1E4 }
+  - { offsetInCU: 0x26, offset: 0x26, size: 0x8, addend: 0x0, symName: _test_basic_alloc_and_free, symObjAddr: 0x0, symBinAddr: 0x100002A2C, symSize: 0x88 }
+  - { offsetInCU: 0x4E, offset: 0x4E, size: 0x8, addend: 0x0, symName: _test_basic_alloc_and_free, symObjAddr: 0x0, symBinAddr: 0x100002A2C, symSize: 0x88 }
+  - { offsetInCU: 0x72, offset: 0x72, size: 0x8, addend: 0x0, symName: _test_multiple_allocs, symObjAddr: 0x88, symBinAddr: 0x100002AB4, symSize: 0x1D0 }
+  - { offsetInCU: 0xB2, offset: 0xB2, size: 0x8, addend: 0x0, symName: _test_alloc_zero_size, symObjAddr: 0x258, symBinAddr: 0x100002C84, symSize: 0x80 }
+  - { offsetInCU: 0xD6, offset: 0xD6, size: 0x8, addend: 0x0, symName: _test_alloc_large_size, symObjAddr: 0x2D8, symBinAddr: 0x100002D04, symSize: 0xFC }
+  - { offsetInCU: 0xFA, offset: 0xFA, size: 0x8, addend: 0x0, symName: _test_free_null, symObjAddr: 0x3D4, symBinAddr: 0x100002E00, symSize: 0x30 }
+  - { offsetInCU: 0x10F, offset: 0x10F, size: 0x8, addend: 0x0, symName: _test_write_to_allocated_memory, symObjAddr: 0x404, symBinAddr: 0x100002E30, symSize: 0xEC }
+  - { offsetInCU: 0x133, offset: 0x133, size: 0x8, addend: 0x0, symName: _test_reuse_after_free, symObjAddr: 0x4F0, symBinAddr: 0x100002F1C, symSize: 0xA4 }
+  - { offsetInCU: 0x165, offset: 0x165, size: 0x8, addend: 0x0, symName: _test_fragmentation, symObjAddr: 0x594, symBinAddr: 0x100002FC0, symSize: 0xC4 }
+  - { offsetInCU: 0x1B3, offset: 0x1B3, size: 0x8, addend: 0x0, symName: _test_different_sizes, symObjAddr: 0x658, symBinAddr: 0x100003084, symSize: 0x1C0 }
+  - { offsetInCU: 0x201, offset: 0x201, size: 0x8, addend: 0x0, symName: _test_alignment, symObjAddr: 0x818, symBinAddr: 0x100003244, symSize: 0xDC }
+  - { offsetInCU: 0x225, offset: 0x225, size: 0x8, addend: 0x0, symName: _thread_alloc_free, symObjAddr: 0x8F4, symBinAddr: 0x100003320, symSize: 0xA8 }
+  - { offsetInCU: 0x285, offset: 0x285, size: 0x8, addend: 0x0, symName: _test_multithreaded, symObjAddr: 0x99C, symBinAddr: 0x1000033C8, symSize: 0xF8 }
+  - { offsetInCU: 0x2E1, offset: 0x2E1, size: 0x8, addend: 0x0, symName: _test_boundary_conditions, symObjAddr: 0xA94, symBinAddr: 0x1000034C0, symSize: 0xD8 }
+  - { offsetInCU: 0x313, offset: 0x313, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0xB6C, symBinAddr: 0x100003598, symSize: 0x64 }
+  - { offsetInCU: 0x26, offset: 0x400, size: 0x8, addend: 0x0, symName: _init_allocator, symObjAddr: 0x0, symBinAddr: 0x1000035FC, symSize: 0x9C }
+  - { offsetInCU: 0x3F, offset: 0x419, size: 0x8, addend: 0x0, symName: _malloc_mutex, symObjAddr: 0x408, symBinAddr: 0x100008000, symSize: 0x0 }
+  - { offsetInCU: 0xAC, offset: 0x486, size: 0x8, addend: 0x0, symName: _allocator, symObjAddr: 0x1268, symBinAddr: 0x100008040, symSize: 0x0 }
+  - { offsetInCU: 0x120, offset: 0x4FA, size: 0x8, addend: 0x0, symName: _init_allocator, symObjAddr: 0x0, symBinAddr: 0x1000035FC, symSize: 0x9C }
+  - { offsetInCU: 0x139, offset: 0x513, size: 0x8, addend: 0x0, symName: _set_bit, symObjAddr: 0x9C, symBinAddr: 0x100003698, symSize: 0x54 }
+  - { offsetInCU: 0x15D, offset: 0x537, size: 0x8, addend: 0x0, symName: _clear_bit, symObjAddr: 0xF0, symBinAddr: 0x1000036EC, symSize: 0x54 }
+  - { offsetInCU: 0x181, offset: 0x55B, size: 0x8, addend: 0x0, symName: _is_bit_set, symObjAddr: 0x144, symBinAddr: 0x100003740, symSize: 0x54 }
+  - { offsetInCU: 0x1A9, offset: 0x583, size: 0x8, addend: 0x0, symName: _tinymalloc, symObjAddr: 0x198, symBinAddr: 0x100003794, symSize: 0x188 }
+  - { offsetInCU: 0x25D, offset: 0x637, size: 0x8, addend: 0x0, symName: _tinyfree, symObjAddr: 0x320, symBinAddr: 0x10000391C, symSize: 0xE4 }
 ...

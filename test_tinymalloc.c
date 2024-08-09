@@ -43,7 +43,7 @@ void test_alloc_large_size() {
   printf("testing allocation of large size...\n");
   printf("about to call tinymalloc for large allocation\n");
   void *ptr = tinymalloc(1024 * 1024); // 1mb
-  printf("returned from tinymallo call");
+  printf("returned from tinymalloc\n");
 
   if (ptr == NULL) {
     printf("large allocation failed\n");
