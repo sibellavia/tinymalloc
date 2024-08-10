@@ -12,9 +12,9 @@
 
 // constants
 #define HEAP_SIZE 1048576
-#define BLOCK_SIZE 16      
-#define BITMAP_SIZE (HEAP_SIZE / BLOCK_SIZE / 8)  
-
+#define BLOCK_SIZE 16
+#define BITMAP_SIZE (HEAP_SIZE / BLOCK_SIZE / 64) // size of bitmap in bytes
+//
 // // BitmapAllocator struct
 // typedef struct {
 //     uint8_t *heap;
@@ -37,4 +37,4 @@ bool is_bit_set(size_t index);
 size_t calculate_blocks_needed(size_t size);
 void *allocate_blocks(size_t start_block, size_t blocks_needed);
 
-#endif 
+#endif

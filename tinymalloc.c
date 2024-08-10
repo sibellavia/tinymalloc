@@ -15,9 +15,9 @@
 #define DEBUG_PRINT(...)
 #endif
 
-#define HEAP_SIZE 1048576                        // 1 mb
-#define BLOCK_SIZE 16                            // 16 bytes per block
-#define BITMAP_SIZE (HEAP_SIZE / BLOCK_SIZE / 8) // size of bitmap in bytes
+#define HEAP_SIZE 1048576                         // 1 mb
+#define BLOCK_SIZE 16                             // 16 bytes per block
+#define BITMAP_SIZE (HEAP_SIZE / BLOCK_SIZE / 64) // size of bitmap in bytes
 
 /* Bitmap */
 // uint8_t *heap: this is a pointer to the memory we'll allocate from.
@@ -26,7 +26,7 @@
 // memory in the heap.
 typedef struct {
   uint8_t *heap;
-  uint8_t *bitmap;
+  uint64_t *bitmap;
   size_t heap_size;
   size_t bitmap_size;
 } BitmapAllocator;
@@ -50,9 +50,10 @@ bool init_allocator() {
   }
 
   // initialize the bitmap (all blocks are free)
-  allocator.bitmap_size = allocator.heap_size / BLOCK_SIZE / 8;
-  allocator.bitmap = mmap(NULL, allocator.bitmap_size, PROT_READ | PROT_WRITE,
-                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  allocator.bitmap_size = (allocator.heap_size / BLOCK_SIZE + 63) / 64;
+  allocator.bitmap =
+      mmap(NULL, allocator.bitmap_size * sizeof(uint64_t),
+           PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (allocator.bitmap == MAP_FAILED) {
     munmap(allocator.heap, allocator.heap_size);
     return false; // initialization failed
@@ -67,21 +68,26 @@ bool init_allocator() {
 /* set_bit(size_t index) */
 // sets a specific bit to 1 (marking a block as used)
 void set_bit(size_t index) {
-  allocator.bitmap[index / 8] |= (1 << (index % 8));
+  size_t bitmap_index = index / 64;
+  size_t bit_offset = index % 64;
+  allocator.bitmap[bitmap_index] |= (1ULL << bit_offset);
 }
 
 /* clear_bit(size_t index) */
 // sets a specific bit to 0 (marking a block as free)
 void clear_bit(size_t index) {
-  allocator.bitmap[index / 8] &= ~(1 << (index % 8));
+  size_t bitmap_index = index / 64;
+  size_t bit_offset = index % 64;
+  allocator.bitmap[bitmap_index] &= ~(1ULL << bit_offset);
 }
 
 /* is_bit_set(size_t index) */
 // checks if a specific bit is 1 or 0
 bool is_bit_set(size_t index) {
-  return (allocator.bitmap[index / 8] & (1 << (index % 8))) != 0;
+  size_t bitmap_index = index / 64;
+  size_t bit_offset = index % 64;
+  return (allocator.bitmap[bitmap_index] & (1ULL << bit_offset)) != 0;
 }
-
 void *extend_heap(size_t size) {
   size_t page_size = sysconf(_SC_PAGESIZE);
   // round up size to a multiple of HEAP_SIZE
@@ -172,10 +178,13 @@ void *tinymalloc(size_t size) {
     if (!is_bit_set(i)) {
       // this block is free
       consecutive_free_blocks++;
-      DEBUG_PRINT("Found free block at index %zu, consecutive free blocks: %zu\n", i, consecutive_free_blocks);
+      DEBUG_PRINT(
+          "Found free block at index %zu, consecutive free blocks: %zu\n", i,
+          consecutive_free_blocks);
 
       if (consecutive_free_blocks == blocks_needed) {
-        DEBUG_PRINT("Found enough space starting at block %zu\n", allocation_start);
+        DEBUG_PRINT("Found enough space starting at block %zu\n",
+                    allocation_start);
         // we've found enough space
         // mark the blocks as used
         allocation_start =
@@ -283,7 +292,8 @@ void tinyfree(void *ptr) {
     return;
   }
 
-  DEBUG_PRINT("Freeing memory at %p, size: %zu, block index: %zu, blocks to free: %zu\n", 
+  DEBUG_PRINT("Freeing memory at %p, size: %zu, block index: %zu, blocks to "
+              "free: %zu\n",
               ptr, size, block_index, blocks_to_free);
 
   // mark the blocks as free
