@@ -43,8 +43,8 @@ i can't guarantee it, but in the future it would be fun to implement a better er
   - implement memory deallocation function (tinyfree)
   - implement initialization function
   - implement heap extension functionality
-  - implement coalescing for free blocks
-  - perform initial performance testing and optimization
+  - switch to 64-bit bitmap for improved efficiency
+  - optimize allocation algorithm using __builtin_ffsll
   - add basic debugging output
 
 - [] v0.3 (enhanced bitmap allocation)
