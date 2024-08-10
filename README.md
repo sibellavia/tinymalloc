@@ -35,7 +35,7 @@ i can't guarantee it, but in the future it would be fun to implement a better er
   - basic thread safety with global mutex
   - replace sbrk() with mmap()
 
-- [] v0.2 (bitmap allocation implementation)
+- [x] v0.2 (bitmap allocation implementation)
 
   - define constants and data structures for bitmap allocator
   - implement basic bitmap manipulation functions
