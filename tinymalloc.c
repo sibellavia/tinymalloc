@@ -19,6 +19,9 @@
 #define BLOCK_SIZE 16                             // 16 bytes per block
 #define BITMAP_SIZE (HEAP_SIZE / BLOCK_SIZE / 64) // size of bitmap in bytes
 
+#define SMALL_ALLOCATION_THRESHOLD  (4 * BLOCK_SIZE)   // 64 bytes
+#define LARGE_ALLOCATION_THRESHOLD  (256 * BLOCK_SIZE) // 4096 bytes
+
 /* Bitmap */
 // uint8_t *heap: this is a pointer to the memory we'll allocate from.
 // uint8_t bitmap[BITMAP_SIZE]: this array represents which blocks of
@@ -183,7 +186,23 @@ void *tinymalloc(size_t size) {
     if (allocator.bitmap[bitmap_index] != UINT64_MAX) {
       // not all bits are set
       // i try to find the first free bit
-      int first_free_bit = __builtin_ffsll(~allocator.bitmap[bitmap_index]) - 1;
+      int first_free_bit;
+
+      // i try an hybrid approach here
+      // manual bit scanning for small and large allocations
+      // __builtin_ffsll for medium allocations
+      if (size <= SMALL_ALLOCATION_THRESHOLD || size >= LARGE_ALLOCATION_THRESHOLD){
+        // mnual bit scanning for small and large allocations
+        uint64_t bitmap_word = ~allocator.bitmap[bitmap_index];
+        first_free_bit = 0;
+        while (!(bitmap_word & 1)){
+          bitmap_word >>= 1;
+          first_free_bit++;
+        }
+      } else {
+        // use __builtin_ffsll for medium allocations
+        first_free_bit = __builtin_ffsll(~allocator.bitmap[bitmap_index]) - 1;
+      }
 
       // check if there are enough contiguous free blocks
       size_t start_block = bitmap_index * 64 + first_free_bit;
@@ -244,10 +263,22 @@ void *tinymalloc(size_t size) {
 
     // start scanning from where the new memory was added
     for (size_t bitmap_index = start_bitmap_index;
-         bitmap_index < new_bitmap_size; bitmap_index++) {
-      if (allocator.bitmap[bitmap_index] != UINT64_MAX) {
-        int first_free_bit =
-            __builtin_ffsll(~allocator.bitmap[bitmap_index]) - 1;
+         bitmap_index < new_bitmap_size; bitmap_index++){
+      if (allocator.bitmap[bitmap_index] != UINT64_MAX){
+        int first_free_bit;
+        if (size <= SMALL_ALLOCATION_THRESHOLD || size >= LARGE_ALLOCATION_THRESHOLD){
+          // manual bit scanning for small and large allocations
+          uint64_t bitmap_word = ~allocator.bitmap[bitmap_index];
+          first_free_bit = 0;
+          while (!(bitmap_word & 1)){
+            bitmap_word >>= 1;
+            first_free_bit++;
+          }
+        } else {
+          // use __builtin_ffsll for medium allocations
+          first_free_bit = __builtin_ffsll(~allocator.bitmap[bitmap_index]) - 1;
+        }
+
         size_t start_block = bitmap_index * 64 + first_free_bit;
         size_t end_block = start_block + blocks_needed;
 
@@ -270,7 +301,7 @@ void *tinymalloc(size_t size) {
                 allocator.heap + (start_block * BLOCK_SIZE);
             if (allocated_memory == NULL) {
               pthread_mutex_unlock(&malloc_mutex);
-              return NULL; // Allocation failed
+              return NULL; // allocation failed
             }
 
             // ensure alignment

@@ -21,6 +21,8 @@
 //     uint8_t bitmap[BITMAP_SIZE];
 // } BitmapAllocator;
 
+extern pthread_mutex_t malloc_mutex;
+
 // function prototypes
 void *tinymalloc(size_t size);
 void tinyfree(void *ptr);
