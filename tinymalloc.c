@@ -1,3 +1,22 @@
+/*
+ * tinymalloc - A simple memory allocator
+ * Copyright (C) 2023 @sibellavia
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ */
+
 #include "tinymalloc.h"
 #include <errno.h>
 #include <pthread.h>
@@ -15,18 +34,31 @@
 #define DEBUG_PRINT(...)
 #endif
 
-#define HEAP_SIZE 1048576                         // 1 mb
-#define BLOCK_SIZE 16                             // 16 bytes per block
-#define BITMAP_SIZE (HEAP_SIZE / BLOCK_SIZE / 64) // size of bitmap in bytes
+// basic constants
+#define HEAP_SIZE 1048576 // 1 mb
+#define BLOCK_SIZE 16     // 16 bytes per block
 
-#define SMALL_ALLOCATION_THRESHOLD  (4 * BLOCK_SIZE)   // 64 bytes
-#define LARGE_ALLOCATION_THRESHOLD  (256 * BLOCK_SIZE) // 4096 bytes
+// derived constants
+#define BITMAP_SIZE (HEAP_SIZE / BLOCK_SIZE / 64)     // size of bitmap in bytes
+#define SMALL_ALLOCATION_THRESHOLD (4 * BLOCK_SIZE)   // 64 bytes
+#define LARGE_ALLOCATION_THRESHOLD (256 * BLOCK_SIZE) // 4096 bytes
+
+// compile-time assertions
+_Static_assert(HEAP_SIZE % BLOCK_SIZE == 0,
+               "HEAP_SIZE must be a multiple of BLOCK_SIZE");
+_Static_assert(BITMAP_SIZE > 0, "BITMAP_SIZE must be greater than 0");
 
 /* Bitmap */
-// uint8_t *heap: this is a pointer to the memory we'll allocate from.
-// uint8_t bitmap[BITMAP_SIZE]: this array represents which blocks of
-// memory are free or in use. each bit corresponds to one block of
-// memory in the heap.
+// uint8_t *heap: this is a pointer to the beginning of the memory heap
+// uint64_t *bitmap: this is a pointer to the bitmap used to track which blocks
+// in the heap are allocated or free
+// size_t heap_size: stores the total size of the heap in bytes
+// size_t bitmap_size: stores the size of the bitmap
+// why i keep track of the sizes separately? bcos the bitmap size is not
+// necessarily directly proportional to the heap size due to the use of 64-bit
+// integers for efficiency
+// many thanks to @basit_ayantunde for suggesting me the change from uint8_t to
+// uint64_t for the bitmap
 typedef struct {
   uint8_t *heap;
   uint64_t *bitmap;
@@ -35,15 +67,13 @@ typedef struct {
 } BitmapAllocator;
 
 static BitmapAllocator allocator;
-
 static bool allocator_initialized = false;
-
 pthread_mutex_t malloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* init_allocator() */
 // here mmap is used to allocate a large chunk of memory for the heap
 // after the check, mmset is used to initialize our bitmap to all zeros
-bool init_allocator() {
+static bool init_allocator() {
   // allocate memory from the heap
   allocator.heap_size = HEAP_SIZE;
   allocator.heap = mmap(NULL, allocator.heap_size, PROT_READ | PROT_WRITE,
@@ -70,7 +100,7 @@ bool init_allocator() {
 
 /* set_bit(size_t index) */
 // sets a specific bit to 1 (marking a block as used)
-void set_bit(size_t index) {
+static inline void set_bit(size_t index) {
   size_t bitmap_index = index / 64;
   size_t bit_offset = index % 64;
   allocator.bitmap[bitmap_index] |= (1ULL << bit_offset);
@@ -78,7 +108,7 @@ void set_bit(size_t index) {
 
 /* clear_bit(size_t index) */
 // sets a specific bit to 0 (marking a block as free)
-void clear_bit(size_t index) {
+static inline void clear_bit(size_t index) {
   size_t bitmap_index = index / 64;
   size_t bit_offset = index % 64;
   allocator.bitmap[bitmap_index] &= ~(1ULL << bit_offset);
@@ -86,13 +116,13 @@ void clear_bit(size_t index) {
 
 /* is_bit_set(size_t index) */
 // checks if a specific bit is 1 or 0
-bool is_bit_set(size_t index) {
+static inline bool is_bit_set(size_t index) {
   size_t bitmap_index = index / 64;
   size_t bit_offset = index % 64;
   return (allocator.bitmap[bitmap_index] & (1ULL << bit_offset)) != 0;
 }
 
-void *extend_heap(size_t size) {
+static void *extend_heap(size_t size) {
   size_t page_size = sysconf(_SC_PAGESIZE);
   // round up size to a multiple of HEAP_SIZE
   size_t extension_size = ((size + page_size - 1) / page_size) * page_size;
@@ -150,7 +180,59 @@ void *extend_heap(size_t size) {
                   extension_size);
 }
 
-/* new tinymalloc based on bitmap */
+static size_t find_free_blocks(size_t blocks_needed) {
+  for (size_t bitmap_index = 0;
+       bitmap_index < allocator.bitmap_size / sizeof(uint64_t);
+       bitmap_index++) {
+    if (allocator.bitmap[bitmap_index] != UINT64_MAX) {
+      int first_free_bit;
+      if (blocks_needed <= SMALL_ALLOCATION_THRESHOLD / BLOCK_SIZE ||
+          blocks_needed >= LARGE_ALLOCATION_THRESHOLD / BLOCK_SIZE) {
+        // hybrid approach here
+        // manual bit scanning for small and large allocations
+        uint64_t bitmap_word = ~allocator.bitmap[bitmap_index];
+        first_free_bit = __builtin_ctzll(bitmap_word);
+      } else {
+        // __builtin_ffsll for medium allocations
+        first_free_bit = __builtin_ffsll(~allocator.bitmap[bitmap_index]) - 1;
+      }
+
+      size_t start_block = bitmap_index * 64 + first_free_bit;
+      size_t end_block = start_block + blocks_needed;
+
+      if (end_block <= allocator.heap_size / BLOCK_SIZE) {
+        bool enough_space = true;
+        for (size_t i = start_block; i < end_block; i++) {
+          if (is_bit_set(i)) {
+            enough_space = false;
+            break;
+          }
+        }
+        if (enough_space) {
+          return start_block;
+        }
+      }
+    }
+  }
+  return SIZE_MAX; // not found :-(
+}
+
+static void *allocate_blocks(size_t start_block, size_t blocks_needed,
+                             size_t size) {
+  for (size_t i = start_block; i < start_block + blocks_needed; i++) {
+    set_bit(i);
+  }
+
+  void *allocated_memory = allocator.heap + (start_block * BLOCK_SIZE);
+  allocated_memory =
+      (void *)(((uintptr_t)allocated_memory + sizeof(size_t) - 1) &
+               ~(sizeof(size_t) - 1));
+  *(size_t *)allocated_memory = size;
+
+  return (char *)allocated_memory + sizeof(size_t);
+}
+
+/* tinymalloc */
 void *tinymalloc(size_t size) {
   if (size == 0)
     return NULL;
@@ -169,159 +251,36 @@ void *tinymalloc(size_t size) {
 
   pthread_mutex_lock(&malloc_mutex);
 
-  // calculate how many blocks we need
-  size_t blocks_needed = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-  size_t bitmap_index = 0;
-
-  // add space for size storage
   size_t total_size = size + sizeof(size_t);
+  size_t blocks_needed = (total_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-  // first-fit search in the bitmap
-  size_t consecutive_free_blocks = 0;
-  size_t allocation_start = 0;
+  DEBUG_PRINT("Allocating %zu bytes (%zu blocks)\n", size, blocks_needed);
 
-  DEBUG_PRINT("Allocating %zu bytes\n", size);
+  size_t start_block = find_free_blocks(blocks_needed);
 
-  while (bitmap_index < allocator.bitmap_size) {
-    if (allocator.bitmap[bitmap_index] != UINT64_MAX) {
-      // not all bits are set
-      // i try to find the first free bit
-      int first_free_bit;
-
-      // i try an hybrid approach here
-      // manual bit scanning for small and large allocations
-      // __builtin_ffsll for medium allocations
-      if (size <= SMALL_ALLOCATION_THRESHOLD || size >= LARGE_ALLOCATION_THRESHOLD){
-        // mnual bit scanning for small and large allocations
-        uint64_t bitmap_word = ~allocator.bitmap[bitmap_index];
-        first_free_bit = 0;
-        while (!(bitmap_word & 1)){
-          bitmap_word >>= 1;
-          first_free_bit++;
-        }
-      } else {
-        // use __builtin_ffsll for medium allocations
-        first_free_bit = __builtin_ffsll(~allocator.bitmap[bitmap_index]) - 1;
-      }
-
-      // check if there are enough contiguous free blocks
-      size_t start_block = bitmap_index * 64 + first_free_bit;
-      size_t end_block = start_block + blocks_needed;
-
-      if (end_block <= allocator.heap_size / BLOCK_SIZE) {
-        bool enough_space = true;
-        for (size_t i = start_block; i < end_block; i++) {
-          if (is_bit_set(i)) {
-            enough_space = false;
-            break;
-          }
-        }
-
-        if (enough_space) {
-          // allocate the blocks
-          for (size_t i = start_block; i < end_block; i++) {
-            set_bit(i);
-          }
-
-          // calculate the memory address to return
-          // pointer arithmetic: i'm multiplying starting_block by BLOCK_SIZE
-          // to get the byte offset, and adding it to the heap
-          void *allocated_memory = allocator.heap + (start_block * BLOCK_SIZE);
-          if (allocated_memory == NULL) {
-            return NULL; // allocation failed
-          }
-
-          // ensure alignment
-          allocated_memory =
-              (void *)(((uintptr_t)allocated_memory + sizeof(size_t) - 1) &
-                       ~(sizeof(size_t) - 1));
-
-          // store the requested size at the beginning of the allocated memory
-          *(size_t *)allocated_memory = size;
-
-          pthread_mutex_unlock(&malloc_mutex);
-
-          // return the address after the size storage
-          return (char *)allocated_memory + sizeof(size_t);
-        }
-      }
+  if (start_block == SIZE_MAX) {
+    // couldn't find space, i try to extend heap
+    size_t extension_size =
+        (blocks_needed * BLOCK_SIZE > allocator.heap_size / 4)
+            ? (blocks_needed * BLOCK_SIZE)
+            : (allocator.heap_size / 4);
+    if (extend_heap(extension_size) == NULL) {
+      pthread_mutex_unlock(&malloc_mutex);
+      return NULL;
     }
 
-    bitmap_index++;
-  }
-
-  // if we get here, we couldn't find enough space
-  // we try to extend the heap
-  size_t extension_size = (blocks_needed * BLOCK_SIZE > allocator.heap_size / 4)
-                              ? (blocks_needed * BLOCK_SIZE)
-                              : (allocator.heap_size / 4);
-  if (extend_heap(extension_size) != NULL) {
-    // heap extended successfully, we retry the allocation
-    size_t new_bitmap_size = allocator.bitmap_size;
-    size_t start_bitmap_index =
-        (allocator.heap_size - extension_size) / (BLOCK_SIZE * 64);
-
-    // start scanning from where the new memory was added
-    for (size_t bitmap_index = start_bitmap_index;
-         bitmap_index < new_bitmap_size; bitmap_index++){
-      if (allocator.bitmap[bitmap_index] != UINT64_MAX){
-        int first_free_bit;
-        if (size <= SMALL_ALLOCATION_THRESHOLD || size >= LARGE_ALLOCATION_THRESHOLD){
-          // manual bit scanning for small and large allocations
-          uint64_t bitmap_word = ~allocator.bitmap[bitmap_index];
-          first_free_bit = 0;
-          while (!(bitmap_word & 1)){
-            bitmap_word >>= 1;
-            first_free_bit++;
-          }
-        } else {
-          // use __builtin_ffsll for medium allocations
-          first_free_bit = __builtin_ffsll(~allocator.bitmap[bitmap_index]) - 1;
-        }
-
-        size_t start_block = bitmap_index * 64 + first_free_bit;
-        size_t end_block = start_block + blocks_needed;
-
-        if (end_block <= allocator.heap_size / BLOCK_SIZE) {
-          bool enough_space = true;
-          for (size_t i = start_block; i < end_block; i++) {
-            if (is_bit_set(i)) {
-              enough_space = false;
-              break;
-            }
-          }
-
-          if (enough_space) {
-            // allocate the blocks
-            for (size_t i = start_block; i < end_block; i++) {
-              set_bit(i);
-            }
-
-            void *allocated_memory =
-                allocator.heap + (start_block * BLOCK_SIZE);
-            if (allocated_memory == NULL) {
-              pthread_mutex_unlock(&malloc_mutex);
-              return NULL; // allocation failed
-            }
-
-            // ensure alignment
-            allocated_memory =
-                (void *)(((uintptr_t)allocated_memory + sizeof(size_t) - 1) &
-                         ~(sizeof(size_t) - 1));
-            // store the requested size at the beginning of the allocated memory
-            *(size_t *)allocated_memory = size;
-
-            pthread_mutex_unlock(&malloc_mutex);
-            // return the address after the size storage
-            return (char *)allocated_memory + sizeof(size_t);
-          }
-        }
-      }
+    // try allocation again...
+    start_block = find_free_blocks(blocks_needed);
+    if (start_block == SIZE_MAX) {
+      pthread_mutex_unlock(&malloc_mutex);
+      return NULL;
     }
   }
-  // if we still couldn't allocate after extending, it's a fail
+
+  void *result = allocate_blocks(start_block, blocks_needed, size);
+
   pthread_mutex_unlock(&malloc_mutex);
-  return NULL;
+  return result;
 }
 
 /* tinyfree */
@@ -355,14 +314,14 @@ void tinyfree(void *ptr) {
     return;
   }
 
-  DEBUG_PRINT("Freeing memory at %p, size: %zu, block index: %zu, blocks to "
+  DEBUG_PRINT("freeing memory at %p, size: %zu, block index: %zu, blocks to "
               "free: %zu\n",
               ptr, size, block_index, blocks_to_free);
 
   // mark the blocks as free
   for (size_t i = block_index; i < block_index + blocks_to_free; i++) {
     clear_bit(i);
-    DEBUG_PRINT("Cleared bit at index %zu\n", i);
+    DEBUG_PRINT("cleared bit at index %zu\n", i);
   }
 
   pthread_mutex_unlock(&malloc_mutex);
