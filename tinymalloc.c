@@ -48,54 +48,94 @@ _Static_assert(HEAP_SIZE % BLOCK_SIZE == 0,
                "HEAP_SIZE must be a multiple of BLOCK_SIZE");
 _Static_assert(BITMAP_SIZE > 0, "BITMAP_SIZE must be greater than 0");
 
-/* Bitmap */
-// uint8_t *heap: this is a pointer to the beginning of the memory heap
-// uint64_t *bitmap: this is a pointer to the bitmap used to track which blocks
-// in the heap are allocated or free
-// size_t heap_size: stores the total size of the heap in bytes
-// size_t bitmap_size: stores the size of the bitmap
-// why i keep track of the sizes separately? bcos the bitmap size is not
-// necessarily directly proportional to the heap size due to the use of 64-bit
-// integers for efficiency
-// many thanks to @basit_ayantunde for suggesting me the change from uint8_t to
-// uint64_t for the bitmap
 typedef struct {
-  uint8_t *heap;
-  uint64_t *bitmap;
-  size_t heap_size;
-  size_t bitmap_size;
-} BitmapAllocator;
+  BitmapAllocator allocator;
+} Arena;
 
-static BitmapAllocator allocator;
+static Arena *arenas = NULL;
+static int num_arenas = 0;
+static bool arenas_initialized = false;
+
+BitmapAllocator allocator;
 static bool allocator_initialized = false;
 pthread_mutex_t malloc_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int get_num_cpus() { return sysconf(_SC_NPROCESSORS_ONLN); }
+
+static void cleanup_allocator(BitmapAllocator *allocator) {
+  if (allocator->heap != NULL) {
+    munmap(allocator->heap, allocator->heap_size);
+    allocator->heap = NULL;
+  }
+  if (allocator->bitmap != NULL) {
+    munmap(allocator->bitmap, allocator->bitmap_size * sizeof(uint64_t));
+    allocator->bitmap = NULL;
+  }
+}
+
+static void cleanup_arenas() {
+  if (arenas != NULL) {
+    for (int i = 0; i < num_arenas; i++) {
+      cleanup_allocator(&arenas[i].allocator);
+    }
+    munmap(arenas, num_arenas * sizeof(Arena));
+    arenas = NULL;
+  }
+  num_arenas = 0;
+  arenas_initialized = false;
+}
 
 /* init_allocator() */
 // here mmap is used to allocate a large chunk of memory for the heap
 // after the check, mmset is used to initialize our bitmap to all zeros
-static bool init_allocator() {
+static bool init_allocator(BitmapAllocator *allocator) {
   // allocate memory from the heap
-  allocator.heap_size = HEAP_SIZE;
-  allocator.heap = mmap(NULL, allocator.heap_size, PROT_READ | PROT_WRITE,
-                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (allocator.heap == MAP_FAILED) {
+  allocator->heap_size = HEAP_SIZE;
+  allocator->heap = mmap(NULL, allocator->heap_size, PROT_READ | PROT_WRITE,
+                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (allocator->heap == MAP_FAILED) {
     return false; // initialization failed
   }
 
   // initialize the bitmap (all blocks are free)
-  allocator.bitmap_size = (allocator.heap_size / BLOCK_SIZE + 63) / 64;
-  allocator.bitmap =
-      mmap(NULL, allocator.bitmap_size * sizeof(uint64_t),
+  allocator->bitmap_size = (allocator->heap_size / BLOCK_SIZE + 63) / 64;
+  allocator->bitmap =
+      mmap(NULL, allocator->bitmap_size * sizeof(uint64_t),
            PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (allocator.bitmap == MAP_FAILED) {
-    munmap(allocator.heap, allocator.heap_size);
+  if (allocator->bitmap == MAP_FAILED) {
+    munmap(allocator->heap, allocator->heap_size);
     return false; // initialization failed
   }
 
   // initialize bitmap to zero (all blocks are free)
-  memset(allocator.bitmap, 0, allocator.bitmap_size);
+  memset(allocator->bitmap, 0, allocator->bitmap_size * sizeof(uint64_t));
 
   return true; // initialization succeeded
+}
+
+static bool init_arenas() {
+  num_arenas = get_num_cpus();
+
+  arenas = mmap(NULL, num_arenas * sizeof(Arena), PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (arenas == MAP_FAILED) {
+    return false;
+  }
+
+  for (int i = 0; i < num_arenas; i++) {
+    if (!init_allocator(&arenas[i].allocator)) {
+      // clean up previously initialized arenas
+      for (int j = 0; j < i; j++) {
+        cleanup_allocator(&arenas[j].allocator);
+      }
+      munmap(arenas, num_arenas * sizeof(Arena));
+      arenas = NULL;
+      num_arenas = 0;
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /* set_bit(size_t index) */
@@ -232,24 +272,32 @@ static void *allocate_blocks(size_t start_block, size_t blocks_needed,
   return (char *)allocated_memory + sizeof(size_t);
 }
 
+static Arena *get_thread_arena() {
+  unsigned long tid = (unsigned long)pthread_self();
+  return &arenas[tid % num_arenas];
+}
+
 /* tinymalloc */
 void *tinymalloc(size_t size) {
   if (size == 0)
     return NULL;
 
-  if (!allocator_initialized) {
-    pthread_mutex_lock(&malloc_mutex);
-    if (!allocator_initialized) {
-      if (!init_allocator()) {
-        pthread_mutex_unlock(&malloc_mutex);
-        return NULL;
-      }
-      allocator_initialized = true;
+  pthread_mutex_lock(&malloc_mutex);
+
+  if (!arenas_initialized) {
+    if (!init_arenas()) {
+      pthread_mutex_unlock(&malloc_mutex);
+      return NULL;
     }
-    pthread_mutex_unlock(&malloc_mutex);
+    arenas_initialized = true;
   }
 
-  pthread_mutex_lock(&malloc_mutex);
+  Arena *arena = get_thread_arena();
+  BitmapAllocator *allocator = &arena->allocator;
+
+  // set the global allocator to the chosen arena's allocator
+  // this should allow to use the existing functions without modification
+  memcpy(&allocator, allocator, sizeof(BitmapAllocator));
 
   size_t total_size = size + sizeof(size_t);
   size_t blocks_needed = (total_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -261,9 +309,9 @@ void *tinymalloc(size_t size) {
   if (start_block == SIZE_MAX) {
     // couldn't find space, i try to extend heap
     size_t extension_size =
-        (blocks_needed * BLOCK_SIZE > allocator.heap_size / 4)
+        (blocks_needed * BLOCK_SIZE > allocator->heap_size / 4)
             ? (blocks_needed * BLOCK_SIZE)
-            : (allocator.heap_size / 4);
+            : (allocator->heap_size / 4);
     if (extend_heap(extension_size) == NULL) {
       pthread_mutex_unlock(&malloc_mutex);
       return NULL;
@@ -278,6 +326,9 @@ void *tinymalloc(size_t size) {
   }
 
   void *result = allocate_blocks(start_block, blocks_needed, size);
+
+  // copy the potentially modified allocator back to the arena
+  memcpy(allocator, &allocator, sizeof(BitmapAllocator));
 
   pthread_mutex_unlock(&malloc_mutex);
   return result;
