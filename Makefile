@@ -10,13 +10,13 @@ TEST_SRC = test_tinymalloc.c
 TEST_OBJ = $(TEST_SRC:.c=.o)
 
 # targets
-all: tinymalloc test_tinymalloc
+all: libtinymalloc.a test_tinymalloc
 
-tinymalloc: $(OBJ)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+libtinymalloc.a: $(OBJ)
+	ar rcs $@ $^
 
-test_tinymalloc: $(TEST_OBJ) $(OBJ)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+test_tinymalloc: $(TEST_OBJ) libtinymalloc.a
+	$(CC) $(CFLAGS) -o $@ $(TEST_OBJ) -L. -ltinymalloc $(LDFLAGS)
 
 # pattern rule for object files
 %.o: %.c
@@ -35,7 +35,7 @@ coverage: test
 
 # clean target
 clean:
-	rm -f *.o tinymalloc test_tinymalloc *.gcno *.gcda *.gcov coverage.info
+	rm -f *.o *.a test_tinymalloc *.gcno *.gcda *.gcov coverage.info
 	rm -rf out
 
 .PHONY: all test clean coverage
