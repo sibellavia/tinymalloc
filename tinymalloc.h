@@ -1,6 +1,9 @@
 #ifndef TINYMALLOC_H
 #define TINYMALLOC_H
 
+#define _GNU_SOURCE
+#include <sched.h>
+
 #include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
