@@ -184,6 +184,15 @@ static inline bool is_bit_set(BitmapAllocator *allocator, size_t index) {
   return (allocator->bitmap[bitmap_index] & (1ULL << bit_offset)) != 0;
 }
 
+static inline int count_set_bits(uint64_t n) {
+  int count = 0;
+  while (n) {
+    count += n & 1;
+    n >>= 1;
+  }
+  return count;
+}
+
 static void *extend_heap(BitmapAllocator *allocator, size_t size) {
   size_t page_size = sysconf(_SC_PAGESIZE);
   // round up size to a multiple of HEAP_SIZE
@@ -305,6 +314,55 @@ static Arena *get_thread_arena() {
   return &arenas[cpu];
 }
 
+static Arena *find_least_used_arena() {
+  Arena *least_used = &arenas[0];
+  size_t min_used_blocks = SIZE_MAX;
+
+  for (int i = 0; i < num_arenas; i++) {
+    size_t used_blocks = 0;
+    for (size_t j = 0; j < arenas[i].allocator.bitmap_size; j++) {
+      used_blocks += count_set_bits(arenas[i].allocator.bitmap[j]);
+    }
+
+    if (used_blocks < min_used_blocks) {
+      min_used_blocks = used_blocks;
+      least_used = &arenas[i];
+    }
+  }
+
+  return least_used;
+}
+
+static void *try_allocate(Arena *arena, size_t size) {
+  BitmapAllocator *allocator = &arena->allocator;
+
+  size_t total_size = size + sizeof(size_t);
+  size_t blocks_needed = (total_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+  DEBUG_PRINT("allocating %zu bytes (%zu blocks)\n", size, blocks_needed);
+
+  size_t start_block = find_free_blocks(allocator, blocks_needed);
+
+  if (start_block == SIZE_MAX) {
+    // couldn't find space, try to extend heap
+    size_t extension_size =
+        (blocks_needed * BLOCK_SIZE > allocator->heap_size / 4)
+            ? (blocks_needed * BLOCK_SIZE)
+            : (allocator->heap_size / 4);
+    if (extend_heap(allocator, extension_size) == NULL) {
+      return NULL;
+    }
+
+    // try allocation again
+    start_block = find_free_blocks(allocator, blocks_needed);
+    if (start_block == SIZE_MAX) {
+      return NULL;
+    }
+  }
+
+  return allocate_blocks(allocator, start_block, blocks_needed, size);
+}
+
 /* tinymalloc */
 void *tinymalloc(size_t size) {
   if (size == 0)
@@ -321,35 +379,16 @@ void *tinymalloc(size_t size) {
   }
 
   Arena *arena = get_thread_arena();
-  BitmapAllocator *allocator = &arena->allocator;
+  void *result = NULL;
 
-  size_t total_size = size + sizeof(size_t);
-  size_t blocks_needed = (total_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+  // try to allocate in the initial arena
+  result = try_allocate(arena, size);
 
-  DEBUG_PRINT("allocating %zu bytes (%zu blocks)\n", size, blocks_needed);
-
-  size_t start_block = find_free_blocks(allocator, blocks_needed);
-
-  if (start_block == SIZE_MAX) {
-    // couldn't find space, i try to extend heap
-    size_t extension_size =
-        (blocks_needed * BLOCK_SIZE > allocator->heap_size / 4)
-            ? (blocks_needed * BLOCK_SIZE)
-            : (allocator->heap_size / 4);
-    if (extend_heap(allocator, extension_size) == NULL) {
-      pthread_mutex_unlock(&malloc_mutex);
-      return NULL;
-    }
-
-    // try allocation again...
-    start_block = find_free_blocks(allocator, blocks_needed);
-    if (start_block == SIZE_MAX) {
-      pthread_mutex_unlock(&malloc_mutex);
-      return NULL;
-    }
+  // if allocation fails, try other arenas
+  if (result == NULL) {
+    arena = find_least_used_arena();
+    result = try_allocate(arena, size);
   }
-
-  void *result = allocate_blocks(allocator, start_block, blocks_needed, size);
 
   pthread_mutex_unlock(&malloc_mutex);
   return result;
