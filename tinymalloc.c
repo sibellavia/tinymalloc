@@ -76,7 +76,6 @@ typedef struct {
 static Arena *arenas = NULL;
 static int num_arenas = 0;
 static bool arenas_initialized = false;
-static bool allocator_initialized = false;
 pthread_mutex_t malloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int get_num_cpus() { return sysconf(_SC_NPROCESSORS_ONLN); }

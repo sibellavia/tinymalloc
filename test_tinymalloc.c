@@ -1,9 +1,9 @@
 #include "tinymalloc.h"
 #include <assert.h>
-#include <stdio.h>
-#include <string.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 #define NUM_THREADS 4
 #define ALLOCS_PER_THREAD 1000
@@ -100,67 +100,68 @@ void test_fragmentation() {
 }
 
 void test_different_sizes() {
-    printf("testing allocations of different sizes...\n");
-    void *ptr1 = tinymalloc(10);
-    void *ptr2 = tinymalloc(100);
-    void *ptr3 = tinymalloc(1000);
-    void *ptr4 = tinymalloc(10000);
-    assert(ptr1 != NULL && ptr2 != NULL && ptr3 != NULL && ptr4 != NULL);
-    assert(ptr1 != ptr2 && ptr2 != ptr3 && ptr3 != ptr4);
-    tinyfree(ptr1);
-    tinyfree(ptr2);
-    tinyfree(ptr3);
-    tinyfree(ptr4);
-    printf("PASSED :-)\n\n");
+  printf("testing allocations of different sizes...\n");
+  void *ptr1 = tinymalloc(10);
+  void *ptr2 = tinymalloc(100);
+  void *ptr3 = tinymalloc(1000);
+  void *ptr4 = tinymalloc(10000);
+  assert(ptr1 != NULL && ptr2 != NULL && ptr3 != NULL && ptr4 != NULL);
+  assert(ptr1 != ptr2 && ptr2 != ptr3 && ptr3 != ptr4);
+  tinyfree(ptr1);
+  tinyfree(ptr2);
+  tinyfree(ptr3);
+  tinyfree(ptr4);
+  printf("PASSED :-)\n\n");
 }
 
 void test_alignment() {
-    printf("testing memory alignment...\n");
-    void *ptr = tinymalloc(100);
-    assert(ptr != NULL);
-    assert(((uintptr_t)ptr % sizeof(void*)) == 0);
-    tinyfree(ptr);
-    printf("PASSED :-)\n\n");
+  printf("testing memory alignment...\n");
+  void *ptr = tinymalloc(100);
+  assert(ptr != NULL);
+  assert(((uintptr_t)ptr % sizeof(void *)) == 0);
+  tinyfree(ptr);
+  printf("PASSED :-)\n\n");
 }
 
-void* thread_alloc_free(void* arg) {
+void *thread_alloc_free(void *arg) {
   (void)arg;
-    for (int i = 0; i < ALLOCS_PER_THREAD; i++) {
-        void* ptr = tinymalloc(ALLOC_SIZE);
-        assert(ptr != NULL);
-        tinyfree(ptr);
-    }
-    return NULL;
+  for (int i = 0; i < ALLOCS_PER_THREAD; i++) {
+    void *ptr = tinymalloc(ALLOC_SIZE);
+    assert(ptr != NULL);
+    tinyfree(ptr);
+  }
+  return NULL;
 }
 
 void test_multithreaded() {
-    printf("testing multithreaded allocations...\n");
-    pthread_t threads[NUM_THREADS];
-    for (int i = 0; i < NUM_THREADS; i++) {
-        pthread_create(&threads[i], NULL, thread_alloc_free, NULL);
-    }
-    for (int i = 0; i < NUM_THREADS; i++) {
-        pthread_join(threads[i], NULL);
-    }
-    printf("PASSED :-)\n\n");
+  printf("testing multithreaded allocations...\n");
+  pthread_t threads[NUM_THREADS];
+  for (int i = 0; i < NUM_THREADS; i++) {
+    pthread_create(&threads[i], NULL, thread_alloc_free, NULL);
+  }
+  for (int i = 0; i < NUM_THREADS; i++) {
+    pthread_join(threads[i], NULL);
+  }
+  printf("PASSED :-)\n\n");
 }
 
 void test_boundary_conditions() {
-    printf("Testing boundary conditions...\n");
-    void* ptr1 = tinymalloc(1);
-    assert(ptr1 != NULL);
-    
-    // Test a large, but not maximum, allocation
-    size_t large_size = 1024 * 1024 * 1024;  // 1 GB
-    void* ptr2 = tinymalloc(large_size);
-    if (ptr2 == NULL) {
-        printf("Note: Large allocation (1GB) failed. This may be expected depending on system resources.\n");
-    } else {
-        tinyfree(ptr2);
-    }
-    
-    tinyfree(ptr1);
-    printf("PASSED :-)\n\n");
+  printf("Testing boundary conditions...\n");
+  void *ptr1 = tinymalloc(1);
+  assert(ptr1 != NULL);
+
+  // Test a large, but not maximum, allocation
+  size_t large_size = 1024 * 1024 * 1024; // 1 GB
+  void *ptr2 = tinymalloc(large_size);
+  if (ptr2 == NULL) {
+    printf("Note: Large allocation (1GB) failed. This may be expected "
+           "depending on system resources.\n");
+  } else {
+    tinyfree(ptr2);
+  }
+
+  tinyfree(ptr1);
+  printf("PASSED :-)\n\n");
 }
 
 int main() {
