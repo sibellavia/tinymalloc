@@ -417,8 +417,6 @@ void *tinymalloc(size_t size) {
     arenas_initialized = true;
   }
 
-  pthread_mutex_unlock(&malloc_mutex);
-
   Arena *arena = get_thread_arena(size);
   printf("tinymalloc: Thread %lu, size %zu, arena %p, heap %p\n",
          (unsigned long)pthread_self(), size, (void *)arena,
