@@ -31,6 +31,7 @@ typedef struct {
   uint64_t *bitmap;
   size_t heap_size;
   size_t bitmap_size;
+  size_t allocated_blocks;
   pthread_mutex_t mutex;
 } BitmapAllocator;
 

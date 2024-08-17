@@ -192,6 +192,14 @@ static inline bool is_bit_set(BitmapAllocator *allocator, size_t index) {
   return (allocator->bitmap[bitmap_index] & (1ULL << bit_offset)) != 0;
 }
 
+static void free_blocks(BitmapAllocator *allocator, size_t start_index,
+                        size_t num_blocks) {
+  for (size_t i = 0; i < num_blocks; i++) {
+    clear_bit(allocator, start_index + i);
+  }
+  allocator->allocated_blocks -= num_blocks;
+}
+
 static inline int count_set_bits(uint64_t n) {
   int count = 0;
   while (n) {
@@ -303,6 +311,8 @@ static void *allocate_blocks(BitmapAllocator *allocator, size_t start_block,
     set_bit(allocator, i);
   }
 
+  allocator->allocated_blocks += blocks_needed;
+
   void *allocated_memory = allocator->heap + (start_block * BLOCK_SIZE);
   allocated_memory =
       (void *)(((uintptr_t)allocated_memory + sizeof(size_t) - 1) &
@@ -312,13 +322,33 @@ static void *allocate_blocks(BitmapAllocator *allocator, size_t start_block,
   return (char *)allocated_memory + sizeof(size_t);
 }
 
-static Arena *get_thread_arena() {
+static Arena *find_least_used_arena() {
+  Arena *least_used = &arenas[0];
+  size_t min_usage = SIZE_MAX;
+
+  for (int i = 0; i < num_arenas; i++) {
+    size_t usage = arenas[i].allocator.allocated_blocks * BLOCK_SIZE;
+    if (usage < min_usage) {
+      min_usage = usage;
+      least_used = &arenas[i];
+    }
+  }
+
+  return least_used;
+}
+
+static Arena *get_thread_arena(size_t size) {
   static _Thread_local int thread_arena_index = -1;
   if (thread_arena_index == -1) {
     pthread_mutex_lock(&arena_index_mutex);
     thread_arena_index = next_arena_index;
     next_arena_index = (next_arena_index + 1) % num_arenas;
     pthread_mutex_unlock(&arena_index_mutex);
+  }
+
+  // for large allocations
+  if (size > LARGE_ALLOCATION_THRESHOLD) {
+    return find_least_used_arena();
   }
   return &arenas[thread_arena_index];
 }
@@ -389,8 +419,8 @@ void *tinymalloc(size_t size) {
 
   pthread_mutex_unlock(&malloc_mutex);
 
-  Arena *arena = get_thread_arena();
-  printf("tinymalloc: thread %lu, size %zu, arena %p, heap %p\n",
+  Arena *arena = get_thread_arena(size);
+  printf("tinymalloc: Thread %lu, size %zu, arena %p, heap %p\n",
          (unsigned long)pthread_self(), size, (void *)arena,
          arena->allocator.heap);
 
@@ -440,39 +470,22 @@ void tinyfree(void *ptr) {
 
   // calculate which block this pointer corrisponds to
   void *actual_start = (char *)ptr - sizeof(size_t);
-
-  if ((uintptr_t)actual_start < (uintptr_t)allocator->heap ||
-      (uintptr_t)actual_start >=
-          (uintptr_t)(allocator->heap + allocator->heap_size)) {
-    pthread_mutex_unlock(&malloc_mutex);
-    return;
-  }
+  size_t block_index = ((uint8_t *)actual_start - allocator->heap) / BLOCK_SIZE;
 
   // retrieve the size of the allocation
   size_t size = *(size_t *)actual_start;
 
-  // calculate which block this pointer corresponds to
-  size_t block_index = ((uint8_t *)actual_start - allocator->heap) / BLOCK_SIZE;
-
   // calculate how many blocks were allocated
   size_t blocks_to_free = (size + sizeof(size_t) + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
+  // check if the blocks to free are within the heap bounds
   if (block_index + blocks_to_free > allocator->heap_size / BLOCK_SIZE) {
     pthread_mutex_unlock(&malloc_mutex);
-    return;
+    return; // trying to free memory outside of the heap
   }
 
-  DEBUG_PRINT("freeing memory at %p, size: %zu, block index: %zu, blocks to "
-              "free: %zu\n",
-              ptr, size, block_index, blocks_to_free);
-
-  // mark the blocks as free
-  for (size_t i = block_index; i < block_index + blocks_to_free; i++) {
-    clear_bit(allocator, i);
-    DEBUG_PRINT("cleared bit at index %zu\n", i);
-  }
-
-  update_arena_usage(arena, -(ssize_t)blocks_to_free);
+  // free the blocks
+  free_blocks(allocator, block_index, blocks_to_free);
 
   pthread_mutex_unlock(&malloc_mutex);
 }
