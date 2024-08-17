@@ -4,10 +4,18 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #define NUM_THREADS 4
 #define ALLOCS_PER_THREAD 1000
 #define ALLOC_SIZE 100
+#define MOCK_HEAP_SIZE 1048576
+
+typedef struct {
+  int thread_id;
+  void **ptrs;
+  int num_allocs;
+} ThreadData;
 
 void test_basic_alloc_and_free() {
   printf("testing basic allocation and free...\n");
@@ -164,6 +172,130 @@ void test_boundary_conditions() {
   printf("PASSED :-)\n\n");
 }
 
+void *allocation_thread(void *arg) {
+  ThreadData *data = (ThreadData *)arg;
+  for (int i = 0; i < data->num_allocs; i++) {
+    data->ptrs[i] = tinymalloc(1000); // Allocate larger chunks
+    assert(data->ptrs[i] != NULL);
+    printf("Thread %d, Allocation %d: pointer %p\n", data->thread_id, i,
+           data->ptrs[i]);
+    usleep(1000); // Small delay to increase chance of thread switching
+  }
+  return NULL;
+}
+
+void test_multi_arena_distribution() {
+  printf("Testing multi-arena distribution...\n");
+
+  pthread_t threads[NUM_THREADS];
+  ThreadData thread_data[NUM_THREADS];
+  void *all_ptrs[NUM_THREADS * ALLOCS_PER_THREAD];
+
+  for (int i = 0; i < NUM_THREADS; i++) {
+    thread_data[i].thread_id = i;
+    thread_data[i].ptrs = &all_ptrs[i * ALLOCS_PER_THREAD];
+    thread_data[i].num_allocs = ALLOCS_PER_THREAD;
+    pthread_create(&threads[i], NULL, allocation_thread, &thread_data[i]);
+  }
+
+  for (int i = 0; i < NUM_THREADS; i++) {
+    pthread_join(threads[i], NULL);
+  }
+
+  int unique_regions = 0;
+  uintptr_t last_region_start = 0;
+  uintptr_t region_starts[32] = {0}; // Assuming max 32 regions
+
+  for (int i = 0; i < NUM_THREADS * ALLOCS_PER_THREAD; i++) {
+    uintptr_t region_start = (uintptr_t)all_ptrs[i] & ~(MOCK_HEAP_SIZE - 1);
+    if (region_start != last_region_start) {
+      int found = 0;
+      for (int j = 0; j < unique_regions; j++) {
+        if (region_starts[j] == region_start) {
+          found = 1;
+          break;
+        }
+      }
+      if (!found) {
+        region_starts[unique_regions++] = region_start;
+        last_region_start = region_start;
+        printf("New unique region found: 0x%lx\n", region_start);
+      }
+    }
+  }
+
+  printf("Number of unique regions: %d\n", unique_regions);
+  printf("Region starts: ");
+  for (int i = 0; i < unique_regions; i++) {
+    printf("0x%lx ", region_starts[i]);
+  }
+  printf("\n");
+
+  // Check if allocations are distributed across multiple arenas
+  assert(unique_regions > 1); // Ensure more than one arena was used
+
+  for (int i = 0; i < NUM_THREADS * ALLOCS_PER_THREAD; i++) {
+    tinyfree(all_ptrs[i]);
+  }
+
+  printf("PASSED :-)\n\n");
+}
+
+void test_find_suitable_arena() {
+  printf("Testing arena selection for different sizes...\n");
+
+  // Allocate a large block
+  void *large_ptr = tinymalloc(MOCK_HEAP_SIZE / 2);
+  assert(large_ptr != NULL);
+
+  // Now allocate a small block, it should go to a different arena
+  void *small_ptr = tinymalloc(100);
+  assert(small_ptr != NULL);
+
+  // Check that small_ptr is not in the same arena as large_ptr
+  uintptr_t large_arena = (uintptr_t)large_ptr & ~(MOCK_HEAP_SIZE - 1);
+  uintptr_t small_arena = (uintptr_t)small_ptr & ~(MOCK_HEAP_SIZE - 1);
+
+  assert(large_arena != small_arena);
+
+  tinyfree(large_ptr);
+  tinyfree(small_ptr);
+
+  printf("PASSED :-)\n\n");
+}
+
+void *stress_thread(void *arg) {
+  int id = *(int *)arg;
+  for (int i = 0; i < 10000; i++) {
+    void *ptr = tinymalloc((id * 100) % 1000 +
+                           1); // Different sizes for different threads
+    assert(ptr != NULL);
+    tinyfree(ptr);
+  }
+  return NULL;
+}
+
+void test_load_balancing_stress() {
+  printf("Testing load balancing under stress...\n");
+
+  int num_threads = 16; // Adjust based on your system
+  pthread_t threads[num_threads];
+  int thread_ids[num_threads];
+
+  for (int i = 0; i < num_threads; i++) {
+    thread_ids[i] = i;
+    pthread_create(&threads[i], NULL, stress_thread, &thread_ids[i]);
+  }
+
+  for (int i = 0; i < num_threads; i++) {
+    pthread_join(threads[i], NULL);
+  }
+
+  // We can't directly check arena usage, but we can verify that the test
+  // completes without errors
+  printf("PASSED :-)\n\n");
+}
+
 int main() {
   test_basic_alloc_and_free();
   test_multiple_allocs();
@@ -177,6 +309,9 @@ int main() {
   test_alignment();
   test_multithreaded();
   test_boundary_conditions();
+  test_multi_arena_distribution();
+  test_find_suitable_arena();
+  test_load_balancing_stress();
 
   printf("all tests passed successfully! :-)\n");
   return 0;
