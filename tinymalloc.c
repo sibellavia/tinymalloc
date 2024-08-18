@@ -38,23 +38,6 @@
 #define DEBUG_PRINT(...)
 #endif
 
-#ifndef HAVE_SCHED_GETCPU
-#include <sys/syscall.h>
-#include <unistd.h>
-
-int sched_getcpu(void) {
-  int cpu;
-#ifdef SYS_getcpu
-  if (syscall(SYS_getcpu, &cpu, NULL, NULL) == -1) {
-    return -1;
-  }
-  return cpu;
-#else
-  return -1;
-#endif
-}
-#endif
-
 // basic constants
 #define HEAP_SIZE 1048576 // 1 mb
 #define BLOCK_SIZE 16     // 16 bytes per block
@@ -88,21 +71,17 @@ static void update_arena_usage(Arena *arena, size_t blocks) {
   arena->allocated_blocks += blocks;
 }
 
-static void cleanup_allocator(BitmapAllocator *allocator) {
-  if (allocator->heap != NULL) {
-    munmap(allocator->heap, allocator->heap_size);
-    allocator->heap = NULL;
-  }
-  if (allocator->bitmap != NULL) {
-    munmap(allocator->bitmap, allocator->bitmap_size * sizeof(uint64_t));
-    allocator->bitmap = NULL;
-  }
-}
-
-static void cleanup_arenas() {
+static void cleanup_memory() {
   if (arenas != NULL) {
     for (int i = 0; i < num_arenas; i++) {
-      cleanup_allocator(&arenas[i].allocator);
+      if (arenas[i].allocator.heap != NULL) {
+        munmap(arenas[i].allocator.heap, arenas[i].allocator.heap_size);
+      }
+      if (arenas[i].allocator.bitmap != NULL) {
+        munmap(arenas[i].allocator.bitmap,
+               arenas[i].allocator.bitmap_size * sizeof(uint64_t));
+      }
+      pthread_mutex_destroy(&arenas[i].mutex);
     }
     munmap(arenas, num_arenas * sizeof(Arena));
     arenas = NULL;
@@ -111,38 +90,8 @@ static void cleanup_arenas() {
   arenas_initialized = false;
 }
 
-/* init_allocator() */
-// here mmap is used to allocate a large chunk of memory for the heap
-// after the check, mmset is used to initialize our bitmap to all zeros
-static bool init_allocator(BitmapAllocator *allocator) {
-  // allocate memory from the heap
-  allocator->heap_size = HEAP_SIZE;
-  allocator->heap = mmap(NULL, allocator->heap_size, PROT_READ | PROT_WRITE,
-                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (allocator->heap == MAP_FAILED) {
-    return false; // initialization failed
-  }
-
-  // initialize the bitmap (all blocks are free)
-  allocator->bitmap_size = (allocator->heap_size / BLOCK_SIZE + 63) / 64;
-  allocator->bitmap =
-      mmap(NULL, allocator->bitmap_size * sizeof(uint64_t),
-           PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (allocator->bitmap == MAP_FAILED) {
-    munmap(allocator->heap, allocator->heap_size);
-    return false; // initialization failed
-  }
-
-  // initialize bitmap to zero (all blocks are free)
-  memset(allocator->bitmap, 0, allocator->bitmap_size * sizeof(uint64_t));
-
-  return true; // initialization succeeded
-}
-
-static bool init_arenas() {
+static bool init_memory() {
   num_arenas = get_num_cpus();
-  printf("initializing %d arenas\n", num_arenas); // debug
-
   arenas = mmap(NULL, num_arenas * sizeof(Arena), PROT_READ | PROT_WRITE,
                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (arenas == MAP_FAILED) {
@@ -150,21 +99,37 @@ static bool init_arenas() {
   }
 
   for (int i = 0; i < num_arenas; i++) {
-    if (!init_allocator(&arenas[i].allocator)) {
-      printf("Failed to initialize arena %d\n", i);
-      // clean up previously initialized arenas
-      for (int j = 0; j < i; j++) {
-        cleanup_allocator(&arenas[j].allocator);
-      }
-      munmap(arenas, num_arenas * sizeof(Arena));
-      arenas = NULL;
-      num_arenas = 0;
+    Arena *arena = &arenas[i];
+    arena->allocator.heap_size = HEAP_SIZE;
+    arena->allocator.heap =
+        mmap(NULL, arena->allocator.heap_size, PROT_READ | PROT_WRITE,
+             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (arena->allocator.heap == MAP_FAILED) {
+      cleanup_memory();
       return false;
     }
-    printf("Arena %d initialized at %p, heap at %p\n", i, (void *)&arenas[i],
-           arenas[i].allocator.heap);
+
+    arena->allocator.bitmap_size =
+        (arena->allocator.heap_size / BLOCK_SIZE + 63) / 64;
+    arena->allocator.bitmap =
+        mmap(NULL, arena->allocator.bitmap_size * sizeof(uint64_t),
+             PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (arena->allocator.bitmap == MAP_FAILED) {
+      cleanup_memory();
+      return false;
+    }
+
+    memset(arena->allocator.bitmap, 0,
+           arena->allocator.bitmap_size * sizeof(uint64_t));
+    arena->allocated_blocks = 0;
+
+    if (pthread_mutex_init(&arena->mutex, NULL) != 0) {
+      cleanup_memory();
+      return false;
+    }
   }
 
+  arenas_initialized = true;
   return true;
 }
 
@@ -198,15 +163,6 @@ static void free_blocks(BitmapAllocator *allocator, size_t start_index,
     clear_bit(allocator, start_index + i);
   }
   allocator->allocated_blocks -= num_blocks;
-}
-
-static inline int count_set_bits(uint64_t n) {
-  int count = 0;
-  while (n) {
-    count += n & 1;
-    n >>= 1;
-  }
-  return count;
 }
 
 static void *extend_heap(BitmapAllocator *allocator, size_t size) {
@@ -322,6 +278,37 @@ static void *allocate_blocks(BitmapAllocator *allocator, size_t start_block,
   return (char *)allocated_memory + sizeof(size_t);
 }
 
+static Arena *select_arena(size_t size) {
+  static _Thread_local int thread_arena_index = -1;
+
+  // initialize thread_arena_index if it hasn't been set
+  if (thread_arena_index == -1) {
+    pthread_mutex_lock(&arena_index_mutex);
+    thread_arena_index = next_arena_index;
+    next_arena_index = (next_arena_index + 1) % num_arenas;
+    pthread_mutex_unlock(&arena_index_mutex);
+  }
+
+  // for small allocations, use the thread's assigned arena
+  if (size <= LARGE_ALLOCATION_THRESHOLD) {
+    return &arenas[thread_arena_index];
+  }
+
+  // for large allocations, find the least used arena
+  Arena *suitable_arena = &arenas[0];
+  size_t min_usage = SIZE_MAX;
+
+  for (int i = 0; i < num_arenas; i++) {
+    size_t usage = arenas[i].allocated_blocks * BLOCK_SIZE;
+    if (usage < min_usage && arenas[i].allocator.heap_size - usage >= size) {
+      min_usage = usage;
+      suitable_arena = &arenas[i];
+    }
+  }
+
+  return suitable_arena;
+}
+
 static Arena *find_least_used_arena() {
   Arena *least_used = &arenas[0];
   size_t min_usage = SIZE_MAX;
@@ -335,41 +322,6 @@ static Arena *find_least_used_arena() {
   }
 
   return least_used;
-}
-
-static Arena *get_thread_arena(size_t size) {
-  static _Thread_local int thread_arena_index = -1;
-  if (thread_arena_index == -1) {
-    pthread_mutex_lock(&arena_index_mutex);
-    thread_arena_index = next_arena_index;
-    next_arena_index = (next_arena_index + 1) % num_arenas;
-    pthread_mutex_unlock(&arena_index_mutex);
-  }
-
-  // for large allocations
-  if (size > LARGE_ALLOCATION_THRESHOLD) {
-    return find_least_used_arena();
-  }
-  return &arenas[thread_arena_index];
-}
-
-static Arena *find_suitable_arena(size_t size) {
-  Arena *suitable_arena = &arenas[0];
-  size_t min_usage = SIZE_MAX;
-
-  for (int i = 0; i < num_arenas; i++) {
-    printf("arena %d usage: %zu\n", i,
-           arenas[i].allocated_blocks); // Debug print
-    if (arenas[i].allocated_blocks < min_usage &&
-        arenas[i].allocator.heap_size -
-                arenas[i].allocated_blocks * BLOCK_SIZE >=
-            size) {
-      min_usage = arenas[i].allocated_blocks;
-      suitable_arena = &arenas[i];
-    }
-  }
-
-  return suitable_arena;
 }
 
 static void *try_allocate(Arena *arena, size_t size) {
@@ -410,26 +362,18 @@ void *tinymalloc(size_t size) {
   pthread_mutex_lock(&malloc_mutex);
 
   if (!arenas_initialized) {
-    if (!init_arenas()) {
+    if (!init_memory()) {
       pthread_mutex_unlock(&malloc_mutex);
       return NULL;
     }
-    arenas_initialized = true;
   }
 
-  Arena *arena = get_thread_arena(size);
+  Arena *arena = select_arena(size);
   printf("tinymalloc: Thread %lu, size %zu, arena %p, heap %p\n",
          (unsigned long)pthread_self(), size, (void *)arena,
          arena->allocator.heap);
 
   void *result = try_allocate(arena, size);
-
-  // if allocation fails, try other arenas
-  if (result == NULL) {
-    arena = find_suitable_arena(size);
-    printf("fallback arena selected: %p\n", (void *)arena);
-    result = try_allocate(arena, size);
-  }
 
   if (result != NULL) {
     size_t blocks_allocated =
