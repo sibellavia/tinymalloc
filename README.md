@@ -10,6 +10,7 @@ i did entirely for fun and for didactic purposes. i started writing in C several
 
 - bitmap-based allocation with first-fit algo (tinymalloc)
 - basic deallocation (tinyfree)
+- multi-arena support
 - global thread-safety with mutex
 - heap extension capability
 - other basic stuff for a mem allocator
