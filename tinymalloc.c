@@ -32,12 +32,6 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#ifdef DEBUG
-#define DEBUG_PRINT(...) printf(__VA_ARGS__)
-#else
-#define DEBUG_PRINT(...)
-#endif
-
 // basic constants
 #define HEAP_SIZE 1048576 // 1 mb
 #define BLOCK_SIZE 16     // 16 bytes per block
@@ -314,8 +308,6 @@ static void *try_allocate(Arena *arena, size_t size) {
 
   size_t total_size = size + sizeof(size_t);
   size_t blocks_needed = (total_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
-  DEBUG_PRINT("allocating %zu bytes (%zu blocks)\n", size, blocks_needed);
 
   size_t start_block = find_free_blocks(allocator, blocks_needed);
 
