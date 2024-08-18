@@ -29,9 +29,6 @@ pull requests are welcome if you want to improve the code :-)
 here are some suggestions:
 
 - use 2 spaces for indentation
-- use meaningful variable and function names
-- comment all functions with a brief description
 - add inline comments where possible
 - write unit tests for new features
 - always check for buffer overflows and memory leaks
-- maintain compatibility with C11
