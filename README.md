@@ -1,35 +1,35 @@
-# tinymalloc
+# tinymalloc: a compact memory allocator
 
-tinymalloc is a basic implementation of a memory allocator, inspired by the standard malloc library.
+tinymalloc is a neat little memory allocator I put together, drawing inspiration from the good old `malloc` we all know from the standard C library.
 
-it provides fundamental memory allocation and deallocation functionality.
+This project is all about providing the essentials for memory allocation and deallocation. I embarked on this journey primarily for the fun of it. 
 
-i did entirely for fun and for didactic purposes. i started writing in C several years ago at a basic level. now i want to improve my skills and reach higher levels. that is why i started this small project.
+## What tinymalloc can do
 
-## features
+-   **Bitmap-Powered Allocation**: at its core, tinymalloc uses a bitmap to keep track of memory blocks. When you ask for memory, it employs a first-fit algorithm to find a suitable spot.
+-   **Straightforward Deallocation**: `tinyfree` releases memory back to the system.
+-   **Multi-Arena Architecture**: to enhance performance in multi-threaded environments, tinymalloc utilizes multiple memory arenas. Each CPU core gets its own arena.
+-   **Thread-Safety (Global Lock)**: for now, thread safety is ensured by a global mutex (`malloc_mutex`).
+-   **Dynamic Heap Expansion**: if an arena runs out of space, tinymalloc can request more memory from the system, extending the heap on the fly.
+-   **Small, Medium, and Large Allocations**: the allocator tries to be smart about how it finds free blocks, using different strategies based on the size of the requested allocation.
 
-- bitmap-based allocation with first-fit algo (tinymalloc)
-- basic deallocation (tinyfree)
-- multi-arena support
-- global thread-safety with mutex
-- heap extension capability
-- other basic stuff for a mem allocator
+## Room for growth 
 
-## areas of improvement
+As you might guess from the "tiny" in tinymalloc, this isn't a production-ready allocator. Yet there's plenty of room for improvement.
 
-as you will see from the code, tinymalloc isn't to be intended for prod or as a totally complete implementation. it has many areas for improvement!
+For instance, I haven't implemented `realloc` or `calloc`. Also, the current thread-safety model, while functional, could be more granular. There are no tunable parameters at runtime, and many advanced features commonly found in mature allocators are still on the to-do list.
 
-in fact, i didn't implement realloc and calloc, a better thread safety, tunable parameters ... and other advanced features
+Looking ahead, it would be great to dive into:
 
-i can't guarantee it, but in the future it would be fun to implement a better error handling, a more complex memory alignment, heap fragmentation handling, and other performance optimizations :-)
+-   More sophisticated error handling.
+-   Finer-grained memory alignment controls.
+-   Strategies to combat heap fragmentation.
+-   Various performance optimizations to make it even zippier!
 
-## contributing
+## Collaborating
 
-pull requests are welcome if you want to improve the code :-)
+If you're thinking of contributing, here are a few friendly guidelines:
 
-here are some suggestions:
-
-- use 2 spaces for indentation
-- add inline comments where possible
-- write unit tests for new features
-- always check for buffer overflows and memory leaks
+-   Clear, concise inline comments are always appreciated, especially for the tricky bits.
+-   If you add new features, please consider writing unit tests.
+-   And, of course, always be mindful of potential buffer overflows and memory leaks.
